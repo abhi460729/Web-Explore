@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Explore - AI-powered search engine delivering precise answers with web search and advanced AI models." />
+  <meta name="keywords" content="AI search, intelligent search, voice search, Seeker" />
+  <meta name="author" content="Explore Team" />
+  <title>Explore</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Shadows+Into+Light&display=swap" rel="stylesheet" />
+  <script src="https://accounts.google.com/gsi/client" async defer onerror="handleGoogleScriptError()"></script>
+  <style>
+    :root {
+      --primary-color: #10b981;
+      --primary-hover: #059669;
+      --text-primary: #1f2937;
+      --text-secondary: #4b5563;
+      --bg-light: #f3f4f6;
+      --accent-color: #f59e0b;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: 'Inter', sans-serif;
+      background-color: #ffffff;
+      color: var(--text-primary);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+
+    h1 {
+      font-family: 'Shadows Into Light', cursive;
+      font-size: 2.5rem;
+      color: var(--text-primary);
+      margin-bottom: 1rem;
+    }
+
+    .container {
+      text-align: center;
+      padding: 2rem;
+      max-width: 1200px;
+      width: 100%;
+    }
+
+    p {
+      font-size: 1.1rem;
+      margin-bottom: 1.5rem;
+      color: var(--text-secondary);
+    }
+
+    .perplexity {
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+
+    .feature-grid {
+      display: flex;
+      flex-direction: row;
+      gap: 1.5rem;
+      overflow-x: auto;
+      padding: 1rem 0;
+      width: 100%;
+      justify-content: center;
+      scroll-behavior: smooth;
+    }
+
+    .feature {
+      background-color: var(--bg-light);
+      padding: 1.5rem;
+      border-radius: 0.5rem;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+      min-width: 200px;
+      flex: 0 1 auto;
+      text-align: left;
+    }
+
+    .feature h3 {
+      font-size: 1.25rem;
+      margin-bottom: 0.5rem;
+      color: var(--text-primary);
+    }
+
+    .feature-label {
+      display: block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--accent-color);
+      margin-bottom: 0.25rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    button {
+      background-color: var(--primary-color);
+      color: white;
+      padding: 0.75rem 1.5rem;
+      border: none;
+      border-radius: 0.5rem;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+
+    button:hover {
+      background-color: var(--primary-hover);
+    }
+
+    button:disabled {
+      background-color: #6b7280;
+      cursor: not-allowed;
+    }
+
+    footer {
+      margin-top: 2rem;
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+    }
+
+    .google-signin {
+      margin-bottom: 2rem;
+    }
+
+    .error-message {
+      color: #dc2626;
+      font-size: 0.9rem;
+      margin-top: 1rem;
+      display: none;
+    }
+
+    @media (max-width: 768px) {
+      .feature-grid {
+        flex-direction: column;
+        align-items: center;
+      }
+
+      .feature {
+        width: 100%;
+        max-width: 400px;
+      }
+
+      h1 {
+        font-size: 2rem;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="google-signin">
+      <div id="g_id_onload"
+           data-client_id="894798159325-dk6csaejr9g00lfr2s2bjjbsot9r8gb5.apps.googleusercontent.com"
+           data-callback="onSignIn"
+           data-auto_prompt="false">
+      </div>
+      <div class="g_id_signin" data-type="standard" data-size="large"></div>
+      <div class="error-message" id="google-signin-error">
+        Failed to load Google Sign-In. Please try again later.
+      </div>
+    </div>
+
+    <h1>Explore</h1>
+    <p>Discover Answers with <span class="perplexity">Explore</span></p>
+    <p><span class="perplexity">Explore</span> is an AI-powered search engine that delivers precise answers by combining web search and advanced AI models. Ask anything, get instant results, and explore smarter.</p>
+
+    <p>Ready to Explore?</p>
+    <p>Sign in with your Google account and start asking questions. Explore Search makes finding answers effortless and intuitive.</p>
+
+    <div class="feature-grid" role="region" aria-label="Seeker Features">
+      <div class="feature">
+        <h3>Intelligent Search</h3>
+        <p>Leverage AI to search the web and get concise, accurate answers with citations from reliable sources.</p>
+      </div>
+      <div class="feature">
+        <h3>Voice Input</h3>
+        <p>Use voice commands to ask questions hands-free, making searching faster and more convenient.</p>
+      </div>
+      <div class="feature">
+        <h3>Customizable AI Models</h3>
+        <p>Choose from multiple AI models like GPT-4o-mini or LLaMA to tailor your search experience.</p>
+      </div>
+      <div class="feature">
+        <span class="feature-label">To be introduced</span>
+        <h3>Agentic AI Browser</h3>
+        <p>Automatically browse, click, and summarize websites using autonomous AI agents for deep information retrieval.</p>
+      </div>
+      <div class="feature">
+        <span class="feature-label">To be introduced</span>
+        <h3>AI Agents Workflow</h3>
+        <p>Enable multi-step task execution in search, where AI agents collaborate to research, verify, and respond intelligently.</p>
+      </div>
+    </div>
+
+    <footer>© 2026 Explore. All rights reserved.</footer>
+  </div>
+
+  <script>
+    function handleGoogleScriptError() {
+      const errorDiv = document.getElementById('google-signin-error');
+      if (errorDiv) {
+        errorDiv.style.display = 'block';
+      }
+    }
+
+    function onSignIn(googleUser) {
+      try {
+        console.log("Google Sign-In initiated");
+        const id_token = googleUser.credential;
+        if (!id_token) {
+          throw new Error('No credential received from Google Sign-In');
+        }
+        console.log("ID Token:", id_token);
+
+        fetch('/api/auth/google', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: id_token })
+        })
+          .then(response => {
+            console.log("Fetch response status:", response.status);
+            if (!response.ok) {
+              throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+            return response.json();
+          })
+          .then(data => {
+            console.log("Fetch response data:", data);
+            if (data.user) {
+              localStorage.setItem('user', JSON.stringify(data.user));
+              console.log("User stored in localStorage:", data.user);
+              window.location.href = '/search';
+            } else {
+              throw new Error(data.error || 'Authentication failed');
+            }
+          })
+          .catch(error => {
+            console.error('Authentication error:', error);
+            alert('Error during sign-in: ' + error.message);
+          });
+      } catch (error) {
+        console.error('Sign-in error:', error);
+        alert('Error during sign-in: ' + error.message);
+      }
+    }
+  </script>
+</body>
+</html>

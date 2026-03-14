@@ -1,0 +1,165 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ──────────────────────────────────────────────
+// MODELS
+// ──────────────────────────────────────────────
+
+model User {
+  id                 String   @id @default(uuid())
+  google_sub         String?  @unique
+  email              String   @unique
+  name               String?
+  picture            String?
+
+  razorpayCustomerId String?  @unique // cust_xxx - Razorpay customer ID (optional, future-proof)
+  
+  subscriptionStart   DateTime?
+  subscriptionEnd     DateTime?
+
+  // Optional: Agar simple rakhte ho toh yeh rakh sakte ho, warna Subscription model se active nikaal lo
+  currentPlanId      String?
+  subscriptionStatus String?  // fallback / legacy
+
+  createdAt          DateTime @default(now())
+
+  currentPlan        Plan?    @relation(fields: [currentPlanId], references: [id])
+  subscriptions      Subscription[]
+  usageLogs          UsageLog[]
+  queryHistory       QueryHistory[]
+  accounts           Account[]
+  sessions           Session[]
+}
+
+model Plan {
+  id              String   @id @default(uuid())
+  name            String   @unique // e.g. FREE, PRO, ULTRA
+  monthlyPrice    Int?     // paise mein (0/null for FREE)
+  usageLimit      Int      // monthly token limit
+  maxQueriesPerDay Int?    // optional daily cap
+  allowedModels   Json?    // ["gpt-4o-mini", "gpt-4o"]
+  features        Json?    // { "voiceInput": true, ... }
+
+  razorpayPlanId  String?  @unique // plan_xxx from Razorpay (create plan API/dashboard se)
+
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  users           User[]
+  subscriptions   Subscription[]
+}
+
+model Subscription {
+  id                     String   @id @default(uuid())
+
+  userId                 String
+  razorpaySubscriptionId String   @unique // sub_xxx - sabse important field
+  razorpayPlanId         String?  // plan_xxx (linked plan)
+  razorpayCustomerId     String?  // cust_xxx
+
+  status                 String   // "created" | "authenticated" | "active" | "pending" | "halted" | "cancelled" | "completed" | "expired"
+  currentPeriodStart     DateTime? // Unix timestamp -> DateTime
+  currentPeriodEnd       DateTime?
+  nextBillingAt          DateTime? // charge_at from Razorpay
+  startedAt              DateTime? // start_at / activated time
+  endedAt                DateTime? // ended_at / completed/expired
+  cancelledAt            DateTime?
+
+  quantity               Int      @default(1)
+  notes                  Json?    // extra notes from Razorpay
+
+  user                   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan                   Plan?    @relation(fields: [razorpayPlanId], references: [razorpayPlanId]) // optional relation
+  payments               SubscriptionPayment[]
+
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+}
+
+model SubscriptionPayment {
+  id                  String   @id @default(uuid())
+
+  subscriptionId      String
+  razorpayPaymentId   String   @unique // pay_xxx
+  razorpayInvoiceId   String?  // inv_xxx
+  amount              Int      // paise mein
+  status              String   // "captured" | "failed" | "authorized" etc.
+  method              String?  // upi, card, netbanking
+  billedAt            DateTime
+  receiptUrl          String?  // Razorpay receipt link
+
+  subscription        Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  createdAt           DateTime @default(now())
+}
+
+model UsageLog {
+  id         String   @id @default(uuid())
+  userId     String
+  queryType  String   // "search", "generate", "agent" etc.
+  tokensUsed Int
+  modelUsed  String?
+  requestId  String?
+  success    Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  inputText  String?  @db.Text
+  outputText String?  @db.Text
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model QueryHistory {
+  id        String   @id @default(uuid())
+  userId    String
+  inputText String   @db.Text
+  queryType String   // "search" / "generate"
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
