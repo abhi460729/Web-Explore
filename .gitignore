@@ -1,4 +1,6 @@
 .env
 .env.local
-node_modules/
 /src/generated/prisma
+node_modules/
+dist/
+*.log
