@@ -4,6 +4,7 @@ const app = express();
 const CLIENT_ID = '651093528570-44viocknkl8hfoiiuon3scti7r80pec0.apps.googleusercontent.com';
 const client = new OAuth2Client(CLIENT_ID);
 
+
 app.use(express.json());
 
 app.post('/api/auth/google', async (req, res) => {
