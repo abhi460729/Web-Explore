@@ -1,7 +1,7 @@
 const express = require('express');
 const { OAuth2Client } = require('google-auth-library');
 const app = express();
-const CLIENT_ID = '1064398075426-240g6t4uktkjr510vjcb7h6e2c9keq3i.apps.googleusercontent.com';
+const CLIENT_ID = '651093528570-44viocknkl8hfoiiuon3scti7r80pec0.apps.googleusercontent.com';
 const client = new OAuth2Client(CLIENT_ID);
 
 app.use(express.json());
