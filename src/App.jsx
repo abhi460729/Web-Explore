@@ -459,7 +459,7 @@ function App() {
             <button
               onClick={handleGo}
               disabled={!companyInput.trim()}
-              className="w-full py-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold rounded-2xl text-lg transition-all"
+              className="w-full py-4 bg-gray-700 hover:bg-gray-800 disabled:bg-gray-400 text-white font-semibold rounded-2xl text-lg transition-all"
             >
               Generate Query & Go to Search →
             </button>
@@ -498,9 +498,9 @@ function App() {
                     navigate("/search", { state: { prefillPrompt: card.promptTemplate } });
                   }
                 }}
-                className="bg-white dark:bg-gray-800 rounded-3xl p-6 sm:p-8 shadow-lg hover:shadow-2xl transition-all duration-300 cursor-pointer border border-gray-100 dark:border-gray-700 hover:border-blue-500 dark:hover:border-blue-600 group"
+                className="bg-white dark:bg-gray-800 rounded-3xl p-6 sm:p-8 shadow-lg hover:shadow-2xl transition-all duration-300 cursor-pointer border border-gray-100 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500 group"
               >
-                <h3 className="text-xl sm:text-2xl font-semibold mb-4 text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                <h3 className="text-xl sm:text-2xl font-semibold mb-4 text-gray-900 dark:text-white group-hover:text-gray-700 dark:group-hover:text-gray-300">
                   {card.title}
                 </h3>
                 <p className="text-sm text-gray-500 dark:text-gray-400 italic break-words">
@@ -587,9 +587,7 @@ function App() {
             {plans.map((plan) => (
               <div
                 key={plan.name}
-                className={`pricing-card relative bg-white dark:bg-gray-800 rounded-3xl p-6 sm:p-8 shadow-xl border ${
-                  plan.popular ? "border-blue-500 scale-105 z-10" : "border-gray-200 dark:border-gray-700"
-                }`}
+                className={`pricing-card relative bg-white dark:bg-gray-800 rounded-3xl p-6 sm:p-8 shadow-xl border ${plan.popular ? "border-blue-500 scale-105 z-10" : "border-gray-200 dark:border-gray-700"}`}
               >
                 {plan.popular && <div className="popular-badge">Most Popular</div>}
                 <h3 className="text-2xl font-bold text-center mb-6 text-gray-900 dark:text-white">
@@ -680,7 +678,7 @@ function App() {
         </button>
       </div>
 
-      {/* Profile Sidebar - SIGN OUT BUTTON COLOR FIXED */}
+      {/* Profile Sidebar */}
       <div className={`profile-sidebar ${isProfileSidebarOpen ? "open" : ""}`}>
         <button
           className="absolute top-4 right-4 p-2 bg-gray-300 rounded-full hover:bg-gray-400"
@@ -713,7 +711,6 @@ function App() {
               <Zap size={18} /> Automate Workflows
             </button>
 
-            {/* Changed from red to gray to match the other buttons */}
             <button
               className="w-full bg-gray-600 hover:bg-gray-700 text-white py-3 rounded-lg"
               onClick={() => {
