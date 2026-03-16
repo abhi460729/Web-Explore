@@ -11,7 +11,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
 
-  <script src="https://accounts.google.com/gsi/client" async defer onerror="handleGoogleScriptError()"></script>
+  <!-- Google Identity Services script -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 
   <style>
     :root {
@@ -83,14 +84,13 @@
 
     .google-button-wrapper {
       width: 100%;
-      max-width: none;
+      max-width: 400px;
       margin: 0 auto;
-      padding: 0 2rem;
     }
 
     .g_id_signin {
       width: 100% !important;
-      /* Removed problematic scale transform */
+      height: 50px !important;
     }
 
     .error-message {
@@ -173,9 +173,6 @@
       .features-grid {
         gap: 1.5rem;
       }
-      .google-button-wrapper {
-        padding: 0 0.5rem;
-      }
     }
 
     @media (max-width: 480px) {
@@ -201,25 +198,28 @@
     </header>
 
     <div class="auth-area">
+      <!-- Google Sign-In initialization -->
       <div id="g_id_onload"
            data-client_id="651093528570-44viocknkl8hfoiiuon3scti7r80pec0.apps.googleusercontent.com"
            data-callback="onSignIn"
            data-auto_prompt="false">
       </div>
 
+      <!-- Google Sign-In button container -->
       <div class="google-button-wrapper">
-        <div class="g_id_signin" 
-             data-type="standard" 
-             data-size="large" 
-             data-theme="outline" 
-             data-text="signin_with" 
-             data-shape="rectangular" 
-             data-logo_alignment="left">
+        <div class="g_id_signin"
+             data-type="standard"
+             data-shape="rectangular"
+             data-theme="filled_blue"          <!-- Change to "outline" if you want white background -->
+             data-text="signin_with"           <!-- This shows "Sign in with Google" -->
+             data-size="large"
+             data-logo_alignment="left"
+             data-width="340">
         </div>
       </div>
 
       <div class="error-message" id="google-signin-error">
-        Failed to load Google Sign-In. Please check your connection and try again.
+        Google Sign-In could not load. Please check your internet and refresh the page.
       </div>
     </div>
 
@@ -271,6 +271,7 @@
         const id_token = googleUser.credential;
         if (!id_token) throw new Error('No credential received');
 
+        // Send token to your backend
         fetch('/api/auth/google', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -289,14 +290,22 @@
           }
         })
         .catch(err => {
-          console.error(err);
+          console.error('Auth error:', err);
           alert('Sign-in error: ' + err.message);
         });
       } catch (err) {
-        console.error(err);
+        console.error('Sign-in failed:', err);
         alert('Sign-in failed: ' + err.message);
       }
     }
+
+    // Optional: If button doesn't appear after 5 seconds, show fallback message
+    setTimeout(() => {
+      const button = document.querySelector('.g_id_signin');
+      if (button && button.innerHTML.trim() === '') {
+        document.getElementById('google-signin-error').style.display = 'block';
+      }
+    }, 5000);
   </script>
 </body>
 </html>
