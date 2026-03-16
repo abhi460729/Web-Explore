@@ -4,250 +4,270 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="description" content="Explore - AI-powered search engine delivering precise answers with web search and advanced AI models." />
-  <meta name="keywords" content="AI search, intelligent search, voice search, Seeker" />
-  <meta name="author" content="Explore Team" />
+  <meta name="keywords" content="AI search, intelligent search, voice search, Explore" />
   <title>Explore</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Shadows+Into+Light&display=swap" rel="stylesheet" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+
   <script src="https://accounts.google.com/gsi/client" async defer onerror="handleGoogleScriptError()"></script>
+
   <style>
     :root {
-      --primary-color: #10b981;
-      --primary-hover: #059669;
-      --text-primary: #1f2937;
-      --text-secondary: #4b5563;
-      --bg-light: #f3f4f6;
-      --accent-color: #f59e0b;
+      --bg: #fafafa;
+      --bg-card: #ffffff;
+      --text: #0f172a;
+      --text-secondary: #475569;
+      --text-muted: #64748b;
+      --primary: #0ea5e9;        /* sky blue – modern & fresh */
+      --primary-dark: #0284c7;
+      --accent: #f97316;          /* warm accent for labels */
+      --border: #e2e8f0;
+      --shadow-sm: 0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.1);
+      --shadow-md: 0 10px 25px -5px rgba(0,0,0,0.08), 0 8px 10px -6px rgba(0,0,0,0.05);
     }
 
     * {
+      margin: 0;
+      padding: 0;
       box-sizing: border-box;
     }
 
     body {
-      margin: 0;
-      padding: 0;
-      font-family: 'Inter', sans-serif;
-      background-color: #ffffff;
-      color: var(--text-primary);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
       min-height: 100vh;
-    }
-
-    h1 {
-      font-family: 'Shadows Into Light', cursive;
-      font-size: 2.5rem;
-      color: var(--text-primary);
-      margin-bottom: 1rem;
+      line-height: 1.6;
     }
 
     .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 4rem 1.5rem 6rem;
       text-align: center;
-      padding: 2rem;
-      max-width: 1200px;
-      width: 100%;
     }
 
-    p {
-      font-size: 1.1rem;
-      margin-bottom: 1.5rem;
+    header {
+      margin-bottom: 5rem;
+    }
+
+    h1 {
+      font-family: 'Playfair Display', serif;
+      font-size: clamp(3.2rem, 8vw, 5.5rem);
+      font-weight: 700;
+      letter-spacing: -0.04em;
+      line-height: 0.95;
+      margin-bottom: 1.25rem;
+      color: var(--text);
+    }
+
+    .subtitle {
+      font-size: 1.35rem;
       color: var(--text-secondary);
+      max-width: 620px;
+      margin: 0 auto 2.5rem;
+      line-height: 1.5;
     }
 
-    .perplexity {
-      color: var(--text-primary);
+    .highlight {
+      color: var(--primary);
       font-weight: 600;
     }
 
-    .feature-grid {
-      display: flex;
-      flex-direction: row;
-      gap: 1.5rem;
-      overflow-x: auto;
-      padding: 1rem 0;
-      width: 100%;
-      justify-content: center;
-      scroll-behavior: smooth;
+    .auth-area {
+      margin: 3rem auto 5rem;
+      max-width: 420px;
     }
 
-    .feature {
-      background-color: var(--bg-light);
-      padding: 1.5rem;
-      border-radius: 0.5rem;
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      min-width: 200px;
-      flex: 0 1 auto;
-      text-align: left;
-    }
-
-    .feature h3 {
-      font-size: 1.25rem;
-      margin-bottom: 0.5rem;
-      color: var(--text-primary);
-    }
-
-    .feature-label {
-      display: block;
-      font-size: 0.75rem;
-      font-weight: 600;
-      color: var(--accent-color);
-      margin-bottom: 0.25rem;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-
-    button {
-      background-color: var(--primary-color);
-      color: white;
-      padding: 0.75rem 1.5rem;
-      border: none;
-      border-radius: 0.5rem;
-      font-size: 1rem;
-      cursor: pointer;
-      transition: background-color 0.2s;
-    }
-
-    button:hover {
-      background-color: var(--primary-hover);
-    }
-
-    button:disabled {
-      background-color: #6b7280;
-      cursor: not-allowed;
-    }
-
-    footer {
-      margin-top: 2rem;
-      font-size: 0.9rem;
-      color: var(--text-secondary);
-    }
-
-    .google-signin {
-      margin-bottom: 2rem;
+    .g_id_signin {
+      width: 100% !important;
+      transform: scale(1.05);
+      transform-origin: center;
     }
 
     .error-message {
-      color: #dc2626;
-      font-size: 0.9rem;
-      margin-top: 1rem;
+      color: #ef4444;
+      font-size: 0.95rem;
+      margin-top: 1.2rem;
       display: none;
     }
 
-    @media (max-width: 768px) {
-      .feature-grid {
-        flex-direction: column;
-        align-items: center;
-      }
+    .features-section {
+      margin-top: 3rem;
+    }
 
-      .feature {
-        width: 100%;
-        max-width: 400px;
-      }
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 1.75rem;
+      margin-top: 3.5rem;
+    }
 
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 1rem;
+      padding: 2rem 1.75rem;
+      text-align: left;
+      transition: all 0.28s ease;
+      box-shadow: var(--shadow-sm);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .feature-card:hover {
+      transform: translateY(-6px);
+      box-shadow: var(--shadow-md);
+      border-color: #cbd5e1;
+    }
+
+    .feature-label {
+      display: inline-block;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      margin-bottom: 0.85rem;
+      padding-bottom: 0.35rem;
+      border-bottom: 2px solid rgba(249, 115, 22, 0.18);
+    }
+
+    .feature-card h3 {
+      font-size: 1.38rem;
+      font-weight: 600;
+      margin-bottom: 0.9rem;
+      color: var(--text);
+    }
+
+    .feature-card p {
+      color: var(--text-muted);
+      font-size: 1.03rem;
+      line-height: 1.55;
+    }
+
+    footer {
+      margin-top: 7rem;
+      color: var(--text-muted);
+      font-size: 0.92rem;
+    }
+
+    @media (max-width: 640px) {
+      .container {
+        padding: 3rem 1.25rem 5rem;
+      }
       h1 {
-        font-size: 2rem;
+        font-size: clamp(2.8rem, 10vw, 4.2rem);
+      }
+      .subtitle {
+        font-size: 1.18rem;
+      }
+      .features-grid {
+        gap: 1.5rem;
       }
     }
   </style>
 </head>
 <body>
+
   <div class="container">
-    <div class="google-signin">
+
+    <header>
+      <h1>Explore</h1>
+      <p class="subtitle">
+        Ask anything.<br>
+        Get clear, fast, <span class="highlight">AI-powered</span> answers — backed by real web results.
+      </p>
+    </header>
+
+    <div class="auth-area">
       <div id="g_id_onload"
            data-client_id="651093528570-44viocknkl8hfoiiuon3scti7r80pec0.apps.googleusercontent.com"
            data-callback="onSignIn"
            data-auto_prompt="false">
-           
       </div>
-      <div class="g_id_signin" data-type="standard" data-size="large"></div>
+      <div class="g_id_signin" data-type="standard" data-size="large" data-theme="outline" data-text="signin_with" data-shape="rectangular" data-logo_alignment="left"></div>
+
       <div class="error-message" id="google-signin-error">
-        Failed to load Google Sign-In. Please try again later.
+        Failed to load Google Sign-In. Please check your connection and try again.
       </div>
     </div>
 
-    <h1>Explore</h1>
-    <p>Discover Answers with <span class="perplexity">Explore</span></p>
-    <p><span class="perplexity">Explore</span> is an AI-powered search engine that delivers precise answers by combining web search and advanced AI models. Ask anything, get instant results, and explore smarter.</p>
+    <div class="features-section">
+      <h2 style="font-size: 1.9rem; font-weight: 600; margin-bottom: 1rem;">What you can do with Explore</h2>
 
-    <p>Ready to Explore?</p>
-    <p>Sign in with your Google account and start asking questions. Explore Search makes finding answers effortless and intuitive.</p>
+      <div class="features-grid">
+        <div class="feature-card">
+          <h3>Intelligent Answers</h3>
+          <p>Real-time web search + powerful AI — concise answers with sources you can trust.</p>
+        </div>
 
-    <div class="feature-grid" role="region" aria-label="Seeker Features">
-      <div class="feature">
-        <h3>Intelligent Search</h3>
-        <p>Leverage AI to search the web and get concise, accurate answers with citations from reliable sources.</p>
-      </div>
-      <div class="feature">
-        <h3>Voice Input</h3>
-        <p>Use voice commands to ask questions hands-free, making searching faster and more convenient.</p>
-      </div>
-      <div class="feature">
-        <h3>Customizable AI Models</h3>
-        <p>Choose from multiple AI models like GPT-4o-mini or LLaMA to tailor your search experience.</p>
-      </div>
-      <div class="feature">
-        <span class="feature-label">To be introduced</span>
-        <h3>Agentic AI Browser</h3>
-        <p>Automatically browse, click, and summarize websites using autonomous AI agents for deep information retrieval.</p>
-      </div>
-      <div class="feature">
-        <span class="feature-label">To be introduced</span>
-        <h3>AI Agents Workflow</h3>
-        <p>Enable multi-step task execution in search, where AI agents collaborate to research, verify, and respond intelligently.</p>
+        <div class="feature-card">
+          <h3>Voice Search</h3>
+          <p>Speak naturally. Get answers instantly. Perfect for mobile or multitasking.</p>
+        </div>
+
+        <div class="feature-card">
+          <h3>Model Choice</h3>
+          <p>Switch between fast lightweight models and more powerful ones when you need depth.</p>
+        </div>
+
+        <div class="feature-card">
+          <span class="feature-label">Coming Soon</span>
+          <h3>AI Agent Browser</h3>
+          <p>Autonomous agents that read, click, reason, and summarize full websites for you.</p>
+        </div>
+
+        <div class="feature-card">
+          <span class="feature-label">Coming Soon</span>
+          <h3>Multi-step Workflows</h3>
+          <p>Let AI agents collaborate — research, cross-check, summarize complex tasks automatically.</p>
+        </div>
       </div>
     </div>
 
-    <footer>© 2026 Explore. All rights reserved.</footer>
+    <footer>
+      © 2026 Explore — Made with curiosity
+    </footer>
+
   </div>
 
   <script>
     function handleGoogleScriptError() {
-      const errorDiv = document.getElementById('google-signin-error');
-      if (errorDiv) {
-        errorDiv.style.display = 'block';
-      }
+      document.getElementById('google-signin-error').style.display = 'block';
     }
 
     function onSignIn(googleUser) {
       try {
-        console.log("Google Sign-In initiated");
         const id_token = googleUser.credential;
-        if (!id_token) {
-          throw new Error('No credential received from Google Sign-In');
-        }
-        console.log("ID Token:", id_token);
+        if (!id_token) throw new Error('No credential received');
 
         fetch('/api/auth/google', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ token: id_token })
         })
-          .then(response => {
-            console.log("Fetch response status:", response.status);
-            if (!response.ok) {
-              throw new Error(`HTTP error! Status: ${response.status}`);
-            }
-            return response.json();
-          })
-          .then(data => {
-            console.log("Fetch response data:", data);
-            if (data.user) {
-              localStorage.setItem('user', JSON.stringify(data.user));
-              console.log("User stored in localStorage:", data.user);
-              window.location.href = '/search';
-            } else {
-              throw new Error(data.error || 'Authentication failed');
-            }
-          })
-          .catch(error => {
-            console.error('Authentication error:', error);
-            alert('Error during sign-in: ' + error.message);
-          });
-      } catch (error) {
-        console.error('Sign-in error:', error);
-        alert('Error during sign-in: ' + error.message);
+        .then(res => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        })
+        .then(data => {
+          if (data.user) {
+            localStorage.setItem('user', JSON.stringify(data.user));
+            window.location.href = '/search';
+          } else {
+            throw new Error(data.error || 'Authentication failed');
+          }
+        })
+        .catch(err => {
+          console.error(err);
+          alert('Sign-in error: ' + err.message);
+        });
+      } catch (err) {
+        console.error(err);
+        alert('Sign-in failed: ' + err.message);
       }
     }
   </script>
