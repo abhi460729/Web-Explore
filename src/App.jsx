@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
 import debounce from "lodash/debounce";
 import DOMPurify from "dompurify";
-import { Plus, User, X, Bot, Globe, Mic, Sun, Moon, Check, Zap } from "lucide-react";
+import { Plus, User, X, Bot, Globe, Mic, Sun, Moon, Check, Zap, ArrowLeft } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -500,12 +500,12 @@ function App() {
             ))}
           </div>
 
-          <div className="mt-16 text-center">
+          <div className="mt-16 flex justify-center">
             <button
               onClick={() => navigate("/search")}
-              className="px-8 py-4 bg-gray-700 hover:bg-gray-800 text-white font-medium rounded-2xl text-lg transition shadow-lg"
+              className="px-8 py-4 bg-gray-700 hover:bg-gray-800 text-white font-medium rounded-2xl text-lg transition shadow-lg flex items-center justify-center gap-2"
             >
-              Back to Search →
+              <ArrowLeft size={20} /> Back to Search
             </button>
           </div>
         </div>
@@ -552,9 +552,89 @@ function App() {
       },
     ];
 
-    const handleUpgrade = (plan) => {
+    const handleUpgrade = async (plan) => {
       if (plan.disabled) return;
-      alert(`Starting upgrade to ${plan.name} – Razorpay flow would begin here`);
+
+      if (!user || !user.id) {
+        alert("Please sign in first to upgrade your plan");
+        navigate("/");
+        return;
+      }
+
+      try {
+        // Create Razorpay order
+        const orderResponse = await fetch("/api/create-razorpay-order", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-user-id": user.id,
+          },
+          body: JSON.stringify({ planName: plan.name }),
+        });
+
+        if (!orderResponse.ok) {
+          const error = await orderResponse.json();
+          throw new Error(error.error || "Failed to create order");
+        }
+
+        const orderData = await orderResponse.json();
+
+        // Razorpay checkout options
+        const options = {
+          key: orderData.key,
+          amount: orderData.order.amount,
+          currency: orderData.order.currency,
+          name: "Web Explore",
+          description: `Upgrade to ${plan.name} Plan`,
+          order_id: orderData.order.id,
+          handler: async function (response) {
+            try {
+              // Verify payment
+              const verifyResponse = await fetch("/api/verify-razorpay-payment", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "x-user-id": user.id,
+                },
+                body: JSON.stringify({
+                  razorpay_order_id: response.razorpay_order_id,
+                  razorpay_payment_id: response.razorpay_payment_id,
+                  razorpay_signature: response.razorpay_signature,
+                  planName: plan.name,
+                }),
+              });
+
+              if (verifyResponse.ok) {
+                alert(`Successfully upgraded to ${plan.name} plan!`);
+                window.location.reload(); // Refresh to update user plan
+              } else {
+                const error = await verifyResponse.json();
+                alert(`Payment verification failed: ${error.error}`);
+              }
+            } catch (err) {
+              console.error("Payment verification error:", err);
+              alert("Payment verification failed. Please contact support.");
+            }
+          },
+          prefill: {
+            name: user.name || "",
+            email: user.email || "",
+          },
+          theme: {
+            color: "#2563eb",
+          },
+        };
+
+        if (!window.Razorpay) {
+          throw new Error("Razorpay SDK not loaded. Please refresh the page.");
+        }
+
+        const rzp = new window.Razorpay(options);
+        rzp.open();
+      } catch (err) {
+        console.error("Payment error:", err);
+        alert(`Payment failed: ${err.message}`);
+      }
     };
 
     return (
@@ -715,9 +795,9 @@ function App() {
 
             <button
               onClick={handleAutomateWorkflows}
-              className="w-full bg-gray-600 hover:bg-gray-700 text-white py-3 rounded-lg font-medium shadow-md transition-all flex items-center justify-center gap-2"
+              className="w-full bg-gray-600 hover:bg-gray-700 text-white py-3 rounded-lg font-medium shadow-md transition-all flex items-center justify-center"
             >
-              <Zap size={18} /> Automate Workflows
+              Automate Workflows
             </button>
 
             <button
