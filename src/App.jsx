@@ -63,7 +63,7 @@ function App() {
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("answer");
   const [theme, setTheme] = useState(localStorage.getItem("theme") || "light");
-  const [companyInput, setCompanyInput] = useState("");
+  const [values, setValues] = useState({}); // for workflow input fields
 
   const user = JSON.parse(localStorage.getItem("user") || "{}");
 
@@ -78,6 +78,137 @@ function App() {
     { key: "ai", label: "AI Search" },
   ];
 
+  const workflowCards = [
+    {
+      title: "Alumni Details",
+      slug: "alumni-details",
+      promptTemplate: "help me find 10 people who went to {{school}} in the last few years who now work at {{company}}",
+      fields: [
+        { key: "school", label: "School / University", placeholder: "e.g. IIT Bombay, Stanford", required: true },
+        { key: "company", label: "Target Company", placeholder: "e.g. Google, Cred", required: true }
+      ]
+    },
+    {
+      title: "YC Company Founders Details",
+      slug: "yc-company-founders",
+      promptTemplate: "do a deep dive on founders of YC company: {{company}}",
+      fields: [
+        { key: "company", label: "Company Name", placeholder: "e.g. Stripe, Brex, OpenAI", required: true }
+      ]
+    },
+    {
+      title: "Antler Company Founder Details",
+      slug: "antler-company-founder",
+      promptTemplate: "do a deep dive on founders of Antler company: {{company}}",
+      fields: [
+        { key: "company", label: "Company Name", placeholder: "e.g. Xalts, Razorpay", required: true }
+      ]
+    },
+    {
+      title: "YC Company Details",
+      slug: "yc-company-details",
+      promptTemplate: "Tell me about what this YC company called {{company}} does",
+      fields: [
+        { key: "company", label: "Company Name", placeholder: "e.g. Stripe, Airbnb, Cred", required: true }
+      ]
+    },
+    {
+      title: "Antler Company Details",
+      slug: "antler-company-details",
+      promptTemplate: "Tell me about what this Antler company called {{company}} does",
+      fields: [
+        { key: "company", label: "Company Name", placeholder: "e.g. Razorpay, Cred", required: true }
+      ]
+    },
+    {
+      title: "LinkedIn Viral Post Research",
+      slug: "linkedin-viral-post",
+      promptTemplate: "Tell a viral post by {{person name}} on LinkedIn",
+      fields: [
+        { key: "person name", label: "Person Name", placeholder: "e.g. Ankur Warikoo, Shradha Sharma", required: true }
+      ]
+    },
+    {
+      title: "Reddit Viral Post Research",
+      slug: "reddit-viral-post",
+      promptTemplate: "Tell me about a viral post on Reddit about {{person name}}",
+      fields: [
+        { key: "person name", label: "Person Name", placeholder: "e.g. Naval Ravikant, Lex Fridman", required: true }
+      ]
+    },
+    {
+      title: "Email Draft",
+      slug: "email-draft",
+      promptTemplate: "Draft me a email for {{subject}}",
+      fields: [
+        { key: "subject", label: "Email Subject / Purpose", placeholder: "e.g. job application follow-up, meeting request", required: true }
+      ]
+    },
+    {
+      title: "College Comparison",
+      slug: "college-comparison",
+      promptTemplate: "Compare colleges {{college 1}} and {{college 2}} and tell me which is overall better",
+      fields: [
+        { key: "college 1", label: "College 1", placeholder: "e.g. IIT Bombay, NIT Trichy", required: true },
+        { key: "college 2", label: "College 2", placeholder: "e.g. IIIT Hyderabad, VIT Vellore", required: true }
+      ]
+    },
+    {
+      title: "Country Comparison to Settle",
+      slug: "country-comparison",
+      promptTemplate: "Country comparison to settle between {{country 1}} and {{country 2}}",
+      fields: [
+        { key: "country 1", label: "Country 1", placeholder: "e.g. Canada, Australia", required: true },
+        { key: "country 2", label: "Country 2", placeholder: "e.g. Germany, Singapore", required: true }
+      ]
+    },
+    {
+      title: "University Comparison Abroad",
+      slug: "university-comparison",
+      promptTemplate: "Comparison between universities abroad: Compare university {{university 1}} and {{university 2}} and tell me which is overall better",
+      fields: [
+        { key: "university 1", label: "University 1", placeholder: "e.g. MIT, Stanford", required: true },
+        { key: "university 2", label: "University 2", placeholder: "e.g. Oxford, Harvard", required: true }
+      ]
+    },
+    {
+      title: "Best Faculties at College",
+      slug: "best-faculties-college",
+      promptTemplate: "Some of the best faculties at {{college name}} in {{department}} at {{campus}}",
+      fields: [
+        { key: "college name", label: "College Name", placeholder: "e.g. IIT Kanpur", required: true },
+        { key: "department", label: "Department", placeholder: "e.g. Computer Science, Mechanical", required: true },
+        { key: "campus", label: "Campus (optional)", placeholder: "e.g. Main campus", required: false }
+      ]
+    },
+    {
+      title: "Best Faculties at School",
+      slug: "best-faculties-school",
+      promptTemplate: "Some of the best faculties at {{school}} in {{city}} for {{subject}}",
+      fields: [
+        { key: "school", label: "School Name", placeholder: "e.g. DPS RK Puram", required: true },
+        { key: "city", label: "City", placeholder: "e.g. Delhi, Mumbai", required: true },
+        { key: "subject", label: "Subject", placeholder: "e.g. Physics, Mathematics", required: true }
+      ]
+    },
+    {
+      title: "Best Coaching Institutes",
+      slug: "best-coaching",
+      promptTemplate: "Best coaching institutes to prepare for {{exam}}",
+      fields: [
+        { key: "exam", label: "Exam Name", placeholder: "e.g. JEE Advanced, NEET, UPSC", required: true }
+      ]
+    },
+    {
+      title: "Best Restaurant in City",
+      slug: "best-restaurant",
+      promptTemplate: "Best restaurant in city {{city}}",
+      fields: [
+        { key: "city", label: "City Name", placeholder: "e.g. Mumbai, Bangalore, Ahmedabad", required: true }
+      ]
+    }
+  ];
+
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("theme", theme);
@@ -87,23 +218,10 @@ function App() {
     const isDev = import.meta.env.DEV;
     const baseTitle = isDev ? "Web Explore - Local" : "Web Explore";
 
-    if (location.pathname.startsWith("/search")) {
-      document.title = baseTitle;
-    } else if (location.pathname === "/pricing") {
-      document.title = isDev ? "Pricing - Web Explore Local" : "Pricing - Web Explore";
-    } else if (location.pathname === "/workflows") {
-      document.title = isDev ? "Workflows - Web Explore Local" : "Workflows - Web Explore";
-    } else if (location.pathname === "/companysearch") {
-      document.title = isDev ? "Company Search - Local" : "Company Search";
-    } else {
-      document.title = baseTitle;
-    }
-  }, [location.pathname]);
-
-  useEffect(() => {
-    if (location.pathname === "/companysearch") {
-      setCompanyInput("");
-    }
+    if (location.pathname.startsWith("/search")) document.title = baseTitle;
+    else if (location.pathname === "/pricing") document.title = isDev ? "Pricing - Web Explore Local" : "Pricing - Web Explore";
+    else if (location.pathname === "/workflows") document.title = isDev ? "Workflows - Web Explore Local" : "Workflows - Web Explore";
+    else document.title = baseTitle;
   }, [location.pathname]);
 
   useEffect(() => {
@@ -135,16 +253,9 @@ function App() {
   };
 
   const generateQuerySlug = (query) =>
-    query
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "")
-      .slice(0, 50);
+    query.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 50);
 
-  const debouncedSetPrompt = useCallback(
-    debounce((value) => setPrompt(value), 300),
-    []
-  );
+  const debouncedSetPrompt = useCallback(debounce((value) => setPrompt(value), 300), []);
 
   const handleMicClick = () => {
     if (!recognition) {
@@ -332,85 +443,38 @@ function App() {
     }
   };
 
-  const workflowCards = [
-    {
-      title: "Alumni Details",
-      promptTemplate: "help me find 10 people who went to {{school}} in the last few years who now work at {{company}}",
-    },
-    {
-      title: "YC Company Founders Details",
-      promptTemplate: "do a deep dive on founders of YC company: {{company}}",
-      isCompanyWorkflow: true,
-    },
-    {
-      title: "Antler Company Founder Details",
-      promptTemplate: "do a deep dive on founders of Antler company: {{company}}",
-      isCompanyWorkflow: true,
-    },
-    {
-      title: "YC Company Details",
-      promptTemplate: "Tell me about what this YC company called {{company}} does",
-      isCompanyWorkflow: true,
-    },
-    {
-      title: "Antler Company Details",
-      promptTemplate: "Tell me about what this Antler company called {{company}} does",
-      isCompanyWorkflow: true,
-    },
-    {
-      title: "LinkedIn Viral Post Research",
-      promptTemplate: "Tell a viral post by {{person name}} on LinkedIn",
-    },
-    {
-      title: "Reddit Viral Post Research",
-      promptTemplate: "Tell me about a viral post on Reddit about {{person name}}",
-    },
-    {
-      title: "Email Draft",
-      promptTemplate: "Draft me a email for {{subject}}",
-    },
-    {
-      title: "College Comparison",
-      promptTemplate: "Compare colleges {{college 1}} and {{college 2}} and tell me which is overall better",
-    },
-    {
-      title: "Country Comparison to Settle",
-      promptTemplate: "Country comparison to settle between {{country 1}} and {{country 2}}",
-    },
-    {
-      title: "University Comparison Abroad",
-      promptTemplate:
-        "Comparison between universities abroad: Compare university {{university 1}} and {{university 2}} and tell me which is overall better",
-    },
-    {
-      title: "Best Faculties at College",
-      promptTemplate: "Some of the best faculties at {{college name}} in {{department}} at {{campus}}",
-    },
-    {
-      title: "Best Faculties at School",
-      promptTemplate: "Some of the best faculties at {{school}} in {{city}} for {{subject}}",
-    },
-    {
-      title: "Best Coaching Institutes",
-      promptTemplate: "Best coaching institutes to prepare for {{exam}}",
-    },
-    {
-      title: "Best Restaurant in City",
-      promptTemplate: "Best restaurant in city {{city}}",
-    },
-  ];
+  // ──────────────────────────────────────────────
+  // GENERIC WORKFLOW INPUT PAGE (replaces old /companysearch style)
+  // ──────────────────────────────────────────────
+  if (location.pathname.startsWith("/workflow-input/")) {
+    const slug = location.pathname.replace("/workflow-input/", "");
+    const workflow = workflowCards.find((w) => w.slug === slug);
 
-  if (location.pathname === "/companysearch") {
-    const workflowTitle = location.state?.workflowTitle || "Company Details";
-    const promptTemplate = location.state?.promptTemplate || "";
+    if (!workflow) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900">
+          <p className="text-2xl text-red-600 dark:text-red-400">Workflow not found</p>
+        </div>
+      );
+    }
 
-    const handleGo = () => {
-      if (!companyInput.trim()) {
-        alert("Please enter company name");
-        return;
-      }
-      const fullPrompt = promptTemplate.replace("{{company}}", companyInput.trim());
-      navigate("/search", { state: { prefillPrompt: fullPrompt } });
+    const handleChange = (key, value) => {
+      setValues((prev) => ({ ...prev, [key]: value }));
+    };
+
+    const isValid = workflow.fields.every(
+      (f) => !f.required || (values[f.key]?.trim?.() || "").length > 0
+    );
+
+    const handleGenerate = () => {
+      if (!isValid) return;
+
+      let finalPrompt = workflow.promptTemplate;
+      Object.entries(values).forEach(([k, v]) => {
+        finalPrompt = finalPrompt.replace(`{{${k}}}`, (v || "").trim());
+      });
+
+      navigate("/search", { state: { prefillPrompt: finalPrompt } });
     };
 
     return (
@@ -427,30 +491,42 @@ function App() {
 
           <div className="bg-white dark:bg-gray-800 rounded-3xl p-8 shadow-xl">
             <h1 className="text-4xl font-bold text-center mb-4 text-gray-900 dark:text-white">
-              {workflowTitle}
+              {workflow.title}
             </h1>
+
             <p className="text-center text-gray-600 dark:text-gray-400 mb-8">
-              Enter the company name below
+              {workflow.fields.length === 1
+                ? "Enter the required information below"
+                : "Fill in the details below"}
             </p>
 
-            <div className="mb-6">
-              <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">
-                Company Name
-              </label>
-              <input
-                type="text"
-                value={companyInput}
-                onChange={(e) => setCompanyInput(e.target.value)}
-                placeholder="e.g. Stripe, Airbnb, OpenAI, Razorpay, Cred"
-                className="w-full px-5 py-4 text-lg border border-gray-300 dark:border-gray-600 rounded-2xl focus:outline-none focus:border-gray-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                onKeyDown={(e) => e.key === "Enter" && handleGo()}
-              />
+            <div className="space-y-6">
+              {workflow.fields.map((field) => (
+                <div key={field.key}>
+                  <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">
+                    {field.label}
+                    {field.required && <span className="text-red-500 ml-1">*</span>}
+                  </label>
+                  <input
+                    type="text"
+                    value={values[field.key] || ""}
+                    onChange={(e) => handleChange(field.key, e.target.value)}
+                    placeholder={field.placeholder}
+                    className="w-full px-5 py-4 text-lg border border-gray-300 dark:border-gray-600 rounded-2xl focus:outline-none focus:border-gray-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    onKeyDown={(e) => e.key === "Enter" && isValid && handleGenerate()}
+                  />
+                </div>
+              ))}
             </div>
 
             <button
-              onClick={handleGo}
-              disabled={!companyInput.trim()}
-              className="w-full py-4 bg-gray-700 hover:bg-gray-800 disabled:bg-gray-400 text-white font-semibold rounded-2xl text-lg transition-all"
+              onClick={handleGenerate}
+              disabled={!isValid}
+              className={`mt-8 w-full py-4 rounded-2xl font-semibold text-lg transition-all ${
+                isValid
+                  ? "bg-gray-700 hover:bg-gray-800 text-white"
+                  : "bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed"
+              }`}
             >
               Generate Query & Go to Search →
             </button>
@@ -460,6 +536,9 @@ function App() {
     );
   }
 
+  // ──────────────────────────────────────────────
+  // WORKFLOWS PAGE
+  // ──────────────────────────────────────────────
   if (location.pathname === "/workflows") {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-12 px-4 sm:px-6 lg:px-8">
@@ -468,7 +547,7 @@ function App() {
             Workflow Automation
           </h1>
           <p className="text-center text-lg text-gray-600 dark:text-gray-400 mb-12 max-w-3xl mx-auto">
-            Click any card to load the ready-made prompt in the search box. Just replace the{" "}
+            Click any card to load the ready-made prompt. Replace{" "}
             <code className="font-mono bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-sm">
               {"{{placeholders}}"}
             </code>{" "}
@@ -479,15 +558,7 @@ function App() {
             {workflowCards.map((card, index) => (
               <div
                 key={index}
-                onClick={() => {
-                  if (card.isCompanyWorkflow) {
-                    navigate("/companysearch", {
-                      state: { workflowTitle: card.title, promptTemplate: card.promptTemplate },
-                    });
-                  } else {
-                    navigate("/search", { state: { prefillPrompt: card.promptTemplate } });
-                  }
-                }}
+                onClick={() => navigate(`/workflow-input/${card.slug}`)}
                 className="bg-white dark:bg-gray-800 rounded-3xl p-6 sm:p-8 shadow-lg hover:shadow-2xl transition-all duration-300 cursor-pointer border border-gray-100 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500 group"
               >
                 <h3 className="text-xl sm:text-2xl font-semibold mb-4 text-gray-900 dark:text-white group-hover:text-gray-700 dark:group-hover:text-gray-300">
@@ -513,6 +584,9 @@ function App() {
     );
   }
 
+  // ──────────────────────────────────────────────
+  // PRICING PAGE (original)
+  // ──────────────────────────────────────────────
   if (location.pathname === "/pricing") {
     const plans = [
       {
@@ -562,7 +636,6 @@ function App() {
       }
 
       try {
-        // Create Razorpay order
         const orderResponse = await fetch("/api/create-razorpay-order", {
           method: "POST",
           headers: {
@@ -579,7 +652,6 @@ function App() {
 
         const orderData = await orderResponse.json();
 
-        // Razorpay checkout options
         const options = {
           key: orderData.key,
           amount: orderData.order.amount,
@@ -589,7 +661,6 @@ function App() {
           order_id: orderData.order.id,
           handler: async function (response) {
             try {
-              // Verify payment
               const verifyResponse = await fetch("/api/verify-razorpay-payment", {
                 method: "POST",
                 headers: {
@@ -606,7 +677,7 @@ function App() {
 
               if (verifyResponse.ok) {
                 alert(`Successfully upgraded to ${plan.name} plan!`);
-                window.location.reload(); // Refresh to update user plan
+                window.location.reload();
               } else {
                 const error = await verifyResponse.json();
                 alert(`Payment verification failed: ${error.error}`);
@@ -725,6 +796,9 @@ function App() {
     );
   }
 
+  // ──────────────────────────────────────────────
+  // HOME / LANDING PAGE
+  // ──────────────────────────────────────────────
   if (location.pathname === "/") {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-900 p-6">
@@ -742,6 +816,9 @@ function App() {
     );
   }
 
+  // ──────────────────────────────────────────────
+  // MAIN SEARCH PAGE
+  // ──────────────────────────────────────────────
   const queryParam = new URLSearchParams(location.search).get("query");
 
   return (
