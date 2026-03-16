@@ -1,4 +1,4 @@
-// server.js - Updated with receipt length fix for Razorpay and FREE plan auto-assignment
+// server.js - Updated with receipt length fix + workflows endpoint without usage check
 
 import { config } from "dotenv";
 config();
@@ -213,7 +213,6 @@ app.post("/api/create-razorpay-order", async (req, res) => {
     return res.status(400).json({ error: "Amount not configured for this plan" });
   }
 
-  // Short receipt (max 40 chars) - using short userId prefix + short timestamp
   const shortUser = userId.substring(0, 8);
   const shortTime = Date.now().toString().slice(-6);
   const receipt = `rcpt_${planName.toLowerCase()}_${shortUser}_${shortTime}`;
@@ -270,7 +269,6 @@ app.post("/api/verify-razorpay-payment", async (req, res) => {
       return res.status(400).json({ success: false, error: "Invalid signature" });
     }
 
-    // Payment verified → update subscription
     const now = new Date();
     const endDate = new Date(now);
     endDate.setMonth(endDate.getMonth() + 1);
@@ -309,7 +307,6 @@ app.post("/api/auth/google", async (req, res) => {
     });
 
     if (!user) {
-      // Find the FREE plan once
       const freePlan = await prisma.plan.findUnique({
         where: { name: "FREE" },
       });
@@ -327,9 +324,7 @@ app.post("/api/auth/google", async (req, res) => {
           currentPlan: {
             connect: { id: freePlan.id },
           },
-          // Optional: set subscription dates for FREE plan
           subscriptionStart: new Date(),
-          // For FREE plan you can leave subscriptionEnd null or set very far future
           subscriptionEnd: new Date(2099, 11, 31),
         },
         include: { currentPlan: true },
@@ -494,6 +489,30 @@ app.post("/api/search", checkUsageAndPlan, async (req, res) => {
   }
 });
 
+// ── Automate Workflows Endpoint (NO checkUsageAndPlan middleware) ──────────
+app.post("/api/automate-workflows", async (req, res) => {
+  const userId = req.headers["x-user-id"];
+
+  if (!userId) {
+    return res.status(401).json({ error: "Unauthorized - user ID missing" });
+  }
+
+  try {
+    console.log(`[Automate] Workflow dashboard access from user ${userId}`);
+
+    res.json({
+      success: true,
+      message: "Workflow dashboard ready",
+      redirectTo: "/workflows"
+    });
+  } catch (err) {
+    console.error("[Automate Workflows Error]:", err);
+    res.status(500).json({
+      error: "Failed to access workflow dashboard"
+    });
+  }
+});
+
 // ── History Endpoint ──────────────────────────────────────────────────────
 app.get("/api/history", checkUsageAndPlan, async (req, res) => {
   try {
@@ -537,7 +556,6 @@ app.get("*", (req, res) => {
 });
 
 app.get("/favicon.ico", (req, res) => res.status(204).end());
-
 
 // ── START SERVER ──────────────────────────────────────────────────────────
 app.listen(port, '0.0.0.0', () => {

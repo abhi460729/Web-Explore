@@ -619,5 +619,18 @@ a:hover {
     2px 2px 8px rgba(0,0,0,0.4);
 }
 
+.explore-doodle {
+  font-family: "Comic Sans MS", cursive, sans-serif;
+  font-weight: 900;
+  letter-spacing: -2px;
+}
+
+.republic-doodle { background: linear-gradient(90deg, #FF9933, #FFFFFF, #138808); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.gandhi-doodle { color: #FF9933; }
+.christmas-doodle { color: #D32F2F; text-shadow: 0 0 15px #fff; }
+.newyear-doodle { color: #FFD700; text-shadow: 0 0 20px gold; }
+.holi-doodle { background: linear-gradient(90deg, #FF0000, #FF9900, #00FF00); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.diwali-doodle { color: #FFAA00; text-shadow: 0 0 15px orange; }
+
 /* Import font */
 @import url('https://fonts.googleapis.com/css2?family=Shadows+Into+Light&display=swap');
