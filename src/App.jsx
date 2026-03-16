@@ -18,11 +18,9 @@ function App() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // ── HOLIDAY DOODLE LOGIC ──
   const getDoodle = () => {
     const today = new Date();
     const monthDay = `${today.getMonth() + 1}-${today.getDate()}`;
-
     const holidays = ["1-26", "8-15", "10-2", "12-25", "1-1", "3-23", "4-14", "8-9", "10-31", "11-1"];
     const isHoliday = holidays.includes(monthDay);
 
@@ -49,13 +47,11 @@ function App() {
         return { text: "Web Explore 🪔", className: "explore-doodle diwali-doodle" };
       }
     }
-
     return { text: "Web Explore", className: "explore-doodle" };
   };
 
   const doodle = getDoodle();
 
-  // ── STATE ────────────────────────────────────────────────────────────────
   const [prompt, setPrompt] = useState("");
   const [response, setResponse] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -82,7 +78,6 @@ function App() {
     { key: "ai", label: "AI Search" },
   ];
 
-  // ── EFFECTS ──────────────────────────────────────────────────────────────
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("theme", theme);
@@ -130,7 +125,6 @@ function App() {
     }
   }, [id, location.search, location.pathname, location.state?.prefillPrompt]);
 
-  // ── HELPERS ──────────────────────────────────────────────────────────────
   const toggleTheme = () => setTheme(theme === "light" ? "dark" : "light");
 
   const toggleModelDropdown = () => setIsModelDropdownOpen(!isModelDropdownOpen);
@@ -199,7 +193,6 @@ function App() {
     setIsProfileSidebarOpen(false);
   };
 
-  // ── SUBMIT ───────────────────────────────────────────────────────────────
   const handleSubmit = async (e, customPrompt = null, customMode = null) => {
     if (e?.preventDefault) e.preventDefault();
     const query = customPrompt || prompt;
@@ -339,7 +332,6 @@ function App() {
     }
   };
 
-  // ── WORKFLOW CARDS ───────────────────────────────────────────────────────
   const workflowCards = [
     {
       title: "Alumni Details",
@@ -408,7 +400,6 @@ function App() {
     },
   ];
 
-  // ── COMPANY SEARCH PAGE ──────────────────────────────────────────────────
   if (location.pathname === "/companysearch") {
     const workflowTitle = location.state?.workflowTitle || "Company Details";
     const promptTemplate = location.state?.promptTemplate || "";
@@ -451,7 +442,7 @@ function App() {
                 value={companyInput}
                 onChange={(e) => setCompanyInput(e.target.value)}
                 placeholder="e.g. Stripe, Airbnb, OpenAI, Razorpay, Cred"
-                className="w-full px-5 py-4 text-lg border border-gray-300 dark:border-gray-600 rounded-2xl focus:outline-none focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                className="w-full px-5 py-4 text-lg border border-gray-300 dark:border-gray-600 rounded-2xl focus:outline-none focus:border-gray-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 onKeyDown={(e) => e.key === "Enter" && handleGo()}
               />
             </div>
@@ -469,7 +460,6 @@ function App() {
     );
   }
 
-  // ── WORKFLOWS PAGE ───────────────────────────────────────────────────────
   if (location.pathname === "/workflows") {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-12 px-4 sm:px-6 lg:px-8">
@@ -523,32 +513,26 @@ function App() {
     );
   }
 
-  // ── PRICING PAGE ────────────────────────────────────────────────────────
   if (location.pathname === "/pricing") {
     const plans = [
       {
         name: "FREE",
         price: 0,
-        period: "Forever",
-        features: [
-          "50 generations per month",
-          "Basic AI model (gpt-4o-mini)",
-          "Standard web search",
-          "Voice input",
-        ],
+        period: "Lifetime",
+        features: ["100 AI Credits", "1 Credit = 1,000 tokens", "Basic support"],
         buttonText: "Current Plan",
         disabled: true,
+        popular: false,
       },
       {
         name: "PRO",
         price: 999,
         period: "per month",
         features: [
-          "Unlimited generations",
-          "Advanced model (gpt-4o)",
-          "Deeper web search (8 results)",
+          "1,000 AI Credits / month",
+          "1 Credit = 1,000 tokens",
+          "Faster responses",
           "Priority support",
-          "Save & organize searches",
         ],
         buttonText: "Upgrade to PRO",
         popular: true,
@@ -558,64 +542,87 @@ function App() {
         price: 3999,
         period: "per month",
         features: [
-          "Everything in PRO",
-          "Highest model access",
-          "Advanced workflows",
-          "Team collaboration (soon)",
-          "API access (soon)",
+          "5,000 AI Credits / month",
+          "1 Credit = 1,000 tokens",
+          "Ultra fast",
+          "Dedicated support",
         ],
         buttonText: "Upgrade to ULTRA",
+        popular: false,
       },
     ];
 
     const handleUpgrade = (plan) => {
-      if (plan.name === "FREE") return;
-      alert(`Upgrading to ${plan.name} – Razorpay flow would start here`);
+      if (plan.disabled) return;
+      alert(`Starting upgrade to ${plan.name} – Razorpay flow would begin here`);
     };
 
     return (
-      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-12 px-4 sm:px-6 lg:px-8">
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-950 py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-6xl mx-auto">
-          <h1 className="text-4xl sm:text-5xl font-bold text-center mb-4 text-gray-900 dark:text-white">
-            Choose Your Plan
-          </h1>
-          <p className="text-center text-lg text-gray-600 dark:text-gray-400 mb-12">
-            Unlock more power. Cancel anytime.
-          </p>
+          <div className="mb-10 flex justify-center">
+            <button
+              onClick={() => navigate("/search")}
+              className="inline-flex items-center gap-2 px-6 py-2.5 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm hover:bg-white dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-200 font-medium rounded-full shadow-sm hover:shadow transition-all duration-200"
+            >
+              ← Back to Search
+            </button>
+          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8 relative">
+          <div className="text-center mb-12">
+            <h1 className="text-4xl sm:text-5xl font-bold text-gray-900 dark:text-white tracking-tight">
+              Choose Your Plan
+            </h1>
+            <p className="mt-4 text-lg text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
+              Unlock more tokens, advanced models and priority access
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8">
             {plans.map((plan) => (
               <div
                 key={plan.name}
-                className={`pricing-card relative bg-white dark:bg-gray-800 rounded-3xl p-6 sm:p-8 shadow-xl border ${plan.popular ? "border-blue-500 scale-105 z-10" : "border-gray-200 dark:border-gray-700"}`}
+                className={`relative bg-white dark:bg-gray-800/90 rounded-3xl p-7 sm:p-9 shadow-xl border transition-all duration-300 hover:shadow-2xl hover:-translate-y-1 ${
+                  plan.popular
+                    ? "border-gray-600/50 scale-[1.03] md:scale-105 z-10 ring-1 ring-gray-500/20"
+                    : "border-gray-200 dark:border-gray-700"
+                }`}
               >
-                {plan.popular && <div className="popular-badge">Most Popular</div>}
+                {plan.popular && (
+                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-5 py-1.5 bg-gradient-to-r from-gray-700 to-gray-900 text-white text-sm font-semibold rounded-full shadow-md">
+                    MOST POPULAR
+                  </div>
+                )}
+
                 <h3 className="text-2xl font-bold text-center mb-6 text-gray-900 dark:text-white">
                   {plan.name}
                 </h3>
-                <div className="text-center mb-6 sm:mb-8">
-                  <span className="text-4xl sm:text-6xl font-bold text-gray-800 dark:text-gray-200">
-                    {plan.price === 0 ? "Free" : `₹${plan.price}`}
+
+                <div className="text-center mb-8">
+                  <span className="text-5xl sm:text-6xl font-extrabold text-gray-900 dark:text-gray-100">
+                    {plan.price === 0 ? "Free" : `₹${plan.price.toLocaleString()}`}
                   </span>
-                  <span className="text-base sm:text-lg text-gray-500 dark:text-gray-400 block">
+                  <span className="block mt-1 text-base text-gray-500 dark:text-gray-400">
                     {plan.period}
                   </span>
                 </div>
-                <ul className="space-y-3 sm:space-y-4 mb-8 sm:mb-10 text-gray-700 dark:text-gray-300">
+
+                <ul className="space-y-4 mb-10 text-gray-700 dark:text-gray-300">
                   {plan.features.map((feature, i) => (
-                    <li key={i} className="flex items-start gap-3">
-                      <Check className="w-5 h-5 sm:w-6 sm:h-6 text-gray-500 mt-0.5 flex-shrink-0" />
-                      <span className="text-sm sm:text-base">{feature}</span>
+                    <li key={i} className="flex items-center gap-3">
+                      <Check className="w-5 h-5 text-emerald-500 flex-shrink-0" />
+                      <span className="text-base">{feature}</span>
                     </li>
                   ))}
                 </ul>
+
                 <button
                   onClick={() => handleUpgrade(plan)}
                   disabled={plan.disabled}
-                  className={`w-full py-3 sm:py-4 rounded-2xl font-bold text-base sm:text-lg transition-all ${
+                  className={`w-full py-3.5 rounded-2xl font-semibold text-base transition-all duration-200 ${
                     plan.disabled
-                      ? "bg-gray-300 dark:bg-gray-700 text-gray-700 cursor-not-allowed"
-                      : "bg-gray-700 hover:bg-gray-800 text-white"
+                      ? "bg-gray-200 dark:bg-gray-700 text-gray-500 cursor-not-allowed"
+                      : "bg-gray-800 hover:bg-gray-900 dark:bg-gray-700 dark:hover:bg-gray-600 text-white shadow-md hover:shadow-lg"
                   }`}
                 >
                   {plan.buttonText}
@@ -624,15 +631,20 @@ function App() {
             ))}
           </div>
 
-          <p className="text-center mt-10 sm:mt-16 text-sm sm:text-base text-gray-500 dark:text-gray-400">
-            Cancel anytime • Secure payment • Questions? Contact support
+          <p className="text-center mt-12 text-sm text-gray-500 dark:text-gray-500">
+            Questions? Contact{" "}
+            <a
+              href="mailto:founders@exploresearch.net"
+              className="underline hover:text-gray-700 dark:hover:text-gray-300"
+            >
+              support
+            </a>
           </p>
         </div>
       </div>
     );
   }
 
-  // ── HOME / LANDING PAGE ─────────────────────────────────────────────────
   if (location.pathname === "/") {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-900 p-6">
@@ -641,7 +653,7 @@ function App() {
           Discover Answers with Web Explore – Ask anything, get instant results
         </p>
         <button
-          className="bg-blue-600 hover:bg-blue-700 text-white px-10 py-4 rounded-xl text-xl font-medium shadow-lg transition"
+          className="bg-gray-700 hover:bg-gray-800 text-white px-10 py-4 rounded-xl text-xl font-medium shadow-lg transition"
           onClick={() => navigate("/search")}
         >
           Start Exploring
@@ -650,12 +662,10 @@ function App() {
     );
   }
 
-  // ── MAIN SEARCH UI ──────────────────────────────────────────────────────
   const queryParam = new URLSearchParams(location.search).get("query");
 
   return (
     <div className="searchpage min-h-screen">
-      {/* Sidebar */}
       <div className="nav-sidebar">
         <button className="sidebar-btn" onClick={() => setIsProfileSidebarOpen(true)} title="Profile">
           <User size={24} />
@@ -678,7 +688,6 @@ function App() {
         </button>
       </div>
 
-      {/* Profile Sidebar */}
       <div className={`profile-sidebar ${isProfileSidebarOpen ? "open" : ""}`}>
         <button
           className="absolute top-4 right-4 p-2 bg-gray-300 rounded-full hover:bg-gray-400"
@@ -692,7 +701,7 @@ function App() {
             <img src={user.picture} alt="Profile" className="w-24 h-24 rounded-full object-cover border-2" />
             <p className="text-xl font-medium">{user.name}</p>
             <p className="text-sm text-gray-600">{user.email}</p>
-            <p className="text-sm font-medium text-blue-600">Current Plan: FREE</p>
+            <p className="text-sm font-medium text-gray-400">Current Plan: FREE</p>
 
             <button
               onClick={() => {
@@ -726,7 +735,6 @@ function App() {
         )}
       </div>
 
-      {/* Main Content */}
       <div className="content-area">
         <div className="full-width-container">
           {location.pathname === "/search" && (
@@ -773,7 +781,7 @@ function App() {
 
           {loading && (
             <div className="mt-8 flex justify-center">
-              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-500"></div>
+              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-gray-600"></div>
             </div>
           )}
 
