@@ -20,9 +20,9 @@
       --text: #0f172a;
       --text-secondary: #475569;
       --text-muted: #64748b;
-      --primary: #0ea5e9;        /* sky blue – modern & fresh */
+      --primary: #0ea5e9;
       --primary-dark: #0284c7;
-      --accent: #f97316;          /* warm accent for labels */
+      --accent: #f97316;
       --border: #e2e8f0;
       --shadow-sm: 0 1px 3px rgba(0,0,0,0.05), 0 1px 2px rgba(0,0,0,0.1);
       --shadow-md: 0 10px 25px -5px rgba(0,0,0,0.08), 0 8px 10px -6px rgba(0,0,0,0.05);
@@ -78,13 +78,18 @@
 
     .auth-area {
       margin: 3rem auto 5rem;
-      max-width: 420px;
+      max-width: 440px;
+    }
+
+    .google-button-wrapper {
+      max-width: 400px;
+      margin: 0 auto;
+      padding: 0 1rem;
     }
 
     .g_id_signin {
       width: 100% !important;
-      transform: scale(1.05);
-      transform-origin: center;
+      /* Removed problematic scale transform */
     }
 
     .error-message {
@@ -167,6 +172,18 @@
       .features-grid {
         gap: 1.5rem;
       }
+      .google-button-wrapper {
+        padding: 0 0.5rem;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .auth-area {
+        max-width: 100%;
+      }
+      .google-button-wrapper {
+        max-width: 100%;
+      }
     }
   </style>
 </head>
@@ -188,7 +205,17 @@
            data-callback="onSignIn"
            data-auto_prompt="false">
       </div>
-      <div class="g_id_signin" data-type="standard" data-size="large" data-theme="outline" data-text="signin_with" data-shape="rectangular" data-logo_alignment="left"></div>
+
+      <div class="google-button-wrapper">
+        <div class="g_id_signin" 
+             data-type="standard" 
+             data-size="large" 
+             data-theme="outline" 
+             data-text="signin_with" 
+             data-shape="rectangular" 
+             data-logo_alignment="left">
+        </div>
+      </div>
 
       <div class="error-message" id="google-signin-error">
         Failed to load Google Sign-In. Please check your connection and try again.
@@ -215,13 +242,13 @@
         </div>
 
         <div class="feature-card">
-          <span class="feature-label">Coming Soon</span>
+          <span class="feature-label">COMING SOON</span>
           <h3>AI Agent Browser</h3>
           <p>Autonomous agents that read, click, reason, and summarize full websites for you.</p>
         </div>
 
         <div class="feature-card">
-          <span class="feature-label">Coming Soon</span>
+          <span class="feature-label">COMING SOON</span>
           <h3>Multi-step Workflows</h3>
           <p>Let AI agents collaborate — research, cross-check, summarize complex tasks automatically.</p>
         </div>
