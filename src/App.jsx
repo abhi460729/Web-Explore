@@ -18,18 +18,16 @@ function App() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // ── HOLIDAY DOODLE LOGIC (Web Explore + occasional festive change) ──
+  // ── HOLIDAY DOODLE LOGIC ──
   const getDoodle = () => {
     const today = new Date();
     const monthDay = `${today.getMonth() + 1}-${today.getDate()}`;
 
     const holidays = ["1-26", "8-15", "10-2", "12-25", "1-1", "3-23", "4-14", "8-9", "10-31", "11-1"];
-
     const isHoliday = holidays.includes(monthDay);
 
-    // Holidays pe 65% chance festive doodle
     if (isHoliday && Math.random() < 0.65) {
-      if (monthDay === "1-26" || monthDay === "8-15") {
+      if (monthDay === "1-26" || monthDay === "8-15" || monthDay === "8-9") {
         return { text: "Web Explore 🇮🇳", className: "explore-doodle republic-doodle" };
       }
       if (monthDay === "10-2") {
@@ -41,14 +39,8 @@ function App() {
       if (monthDay === "1-1") {
         return { text: "Web Explore 🎉", className: "explore-doodle newyear-doodle" };
       }
-      if (monthDay === "3-23") {
-        return { text: "Web Explore 🇮🇳", className: "explore-doodle republic-doodle" };
-      }
       if (monthDay === "4-14") {
         return { text: "Web Explore 🌸", className: "explore-doodle holi-doodle" };
-      }
-      if (monthDay === "8-9") {
-        return { text: "Web Explore 🇮🇳", className: "explore-doodle republic-doodle" };
       }
       if (monthDay === "10-31") {
         return { text: "Web Explore 🎃", className: "explore-doodle halloween-doodle" };
@@ -58,30 +50,12 @@ function App() {
       }
     }
 
-    // Normal days (or 35% on holidays)
     return { text: "Web Explore", className: "explore-doodle" };
   };
 
   const doodle = getDoodle();
 
-  // ── PAGE TITLE LOGIC (Web Explore everywhere) ──
-  useEffect(() => {
-    const isDev = import.meta.env.DEV;
-    const baseTitle = isDev ? "Web Explore - Local" : "Web Explore";
-
-    if (location.pathname.startsWith("/search")) {
-      document.title = baseTitle;
-    } else if (location.pathname === "/pricing") {
-      document.title = isDev ? "Pricing - Web Explore Local" : "Pricing - Web Explore";
-    } else if (location.pathname === "/workflows") {
-      document.title = isDev ? "Workflows - Web Explore Local" : "Workflows - Web Explore";
-    } else if (location.pathname === "/" || location.pathname === "") {
-      document.title = baseTitle;
-    } else {
-      document.title = baseTitle;
-    }
-  }, [location.pathname]);
-
+  // ── STATE ────────────────────────────────────────────────────────────────
   const [prompt, setPrompt] = useState("");
   const [response, setResponse] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -93,6 +67,8 @@ function App() {
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("answer");
   const [theme, setTheme] = useState(localStorage.getItem("theme") || "light");
+  const [companyInput, setCompanyInput] = useState("");
+
   const user = JSON.parse(localStorage.getItem("user") || "{}");
 
   const models = [
@@ -105,6 +81,64 @@ function App() {
     { key: "search", label: "Web Search" },
     { key: "ai", label: "AI Search" },
   ];
+
+  // ── EFFECTS ──────────────────────────────────────────────────────────────
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("theme", theme);
+  }, [theme]);
+
+  useEffect(() => {
+    const isDev = import.meta.env.DEV;
+    const baseTitle = isDev ? "Web Explore - Local" : "Web Explore";
+
+    if (location.pathname.startsWith("/search")) {
+      document.title = baseTitle;
+    } else if (location.pathname === "/pricing") {
+      document.title = isDev ? "Pricing - Web Explore Local" : "Pricing - Web Explore";
+    } else if (location.pathname === "/workflows") {
+      document.title = isDev ? "Workflows - Web Explore Local" : "Workflows - Web Explore";
+    } else if (location.pathname === "/companysearch") {
+      document.title = isDev ? "Company Search - Local" : "Company Search";
+    } else {
+      document.title = baseTitle;
+    }
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (location.pathname === "/companysearch") {
+      setCompanyInput("");
+    }
+  }, [location.pathname]);
+
+  useEffect(() => {
+    const query = new URLSearchParams(location.search).get("query");
+    const prefillFromState = location.state?.prefillPrompt;
+
+    if (id && query) {
+      handleUrlSearch(query, id);
+    } else if (prefillFromState && location.pathname === "/search") {
+      setPrompt(prefillFromState);
+      setResponse(null);
+      setMode("search");
+      setError("");
+    } else if (location.pathname === "/search") {
+      setResponse(null);
+      setPrompt("");
+      setMode("search");
+      setError("");
+    }
+  }, [id, location.search, location.pathname, location.state?.prefillPrompt]);
+
+  // ── HELPERS ──────────────────────────────────────────────────────────────
+  const toggleTheme = () => setTheme(theme === "light" ? "dark" : "light");
+
+  const toggleModelDropdown = () => setIsModelDropdownOpen(!isModelDropdownOpen);
+
+  const selectModel = (model) => {
+    setSelectedModel(model);
+    setIsModelDropdownOpen(false);
+  };
 
   const generateQuerySlug = (query) =>
     query
@@ -143,17 +177,44 @@ function App() {
     }
   };
 
+  const makeCitationsClickable = (text, citations = []) => {
+    return text.replace(/\[(\d+)\]/g, (match, num) => {
+      const citation = citations.find((c) => c.id === parseInt(num));
+      if (citation) {
+        return `<sup class="citation"><a href="${citation.url}" target="_blank" rel="noopener noreferrer">[${num}]</a></sup>`;
+      }
+      return match;
+    });
+  };
+
+  const showTab = (tab) => setActiveTab(tab);
+
+  const handleSuggestionClick = (suggestion) => {
+    setPrompt(suggestion);
+    handleSubmit(null, suggestion);
+  };
+
+  const handleAutomateWorkflows = () => {
+    navigate("/workflows");
+    setIsProfileSidebarOpen(false);
+  };
+
+  // ── SUBMIT ───────────────────────────────────────────────────────────────
   const handleSubmit = async (e, customPrompt = null, customMode = null) => {
     if (e?.preventDefault) e.preventDefault();
     const query = customPrompt || prompt;
     const activeMode = customMode || mode;
-    
+
+    if (!query.trim()) return;
+
     setLoading(true);
     setError("");
     setResponse(null);
     setActiveTab("answer");
+
     const tempId = uuidv4();
     const querySlug = generateQuerySlug(query);
+
     try {
       let res, data;
       if (activeMode === "search") {
@@ -177,11 +238,13 @@ function App() {
           body: JSON.stringify({ prompt: query, model: selectedModel }),
         });
       }
+
       data = await res.json();
+
       if (!res.ok) {
         if (data.upgradeNeeded === true) {
           navigate(data.redirectTo || "/pricing");
-          setError((data.error || "Plan limit reached") + " → Redirecting to pricing page...");
+          setError((data.error || "Plan limit reached") + " → Redirecting to pricing...");
           setTimeout(() => {
             window.location.href = data.redirectTo || "/pricing";
           }, 1800);
@@ -192,11 +255,13 @@ function App() {
         setLoading(false);
         return;
       }
+
       setPrompt(query);
       setMode(activeMode);
       setResponse(data);
+
       if (activeMode === "search") {
-        navigate(`/search/${data.querySlug}-${data.finalId}?query=${encodeURIComponent(query)}`);
+        navigate(`/search/${data.querySlug || querySlug}-${data.finalId}?query=${encodeURIComponent(query)}`);
       } else {
         const finalId = uuidv4();
         navigate(`/search/ai/${querySlug}-${finalId}?query=${encodeURIComponent(query)}`);
@@ -213,9 +278,11 @@ function App() {
       setError("Invalid or missing query in URL");
       return;
     }
+
     setLoading(true);
     setError("");
     setResponse(null);
+
     try {
       let res, data;
       if (searchId.startsWith("ai/") || searchId.startsWith("ai/new/")) {
@@ -237,14 +304,14 @@ function App() {
           body: JSON.stringify({ query }),
         });
       }
+
       data = await res.json();
+
       if (!res.ok) {
         if (data.upgradeNeeded === true) {
           navigate(data.redirectTo || "/pricing");
-          setError((data.error || "Plan limit reached") + " → Redirecting to pricing page...");
-          setTimeout(() => {
-            window.location.href = data.redirectTo || "/pricing";
-          }, 1800);
+          setError((data.error || "Plan limit reached") + " → Redirecting...");
+          setTimeout(() => window.location.href = data.redirectTo || "/pricing", 1800);
           setLoading(false);
           return;
         }
@@ -252,11 +319,14 @@ function App() {
         setLoading(false);
         return;
       }
+
       setPrompt(query);
       setMode(searchId.startsWith("ai/") ? "ai" : "search");
       setResponse(data);
+
       const querySlug = generateQuerySlug(query);
-      const finalId = searchId.includes("new/") ? data.finalId || uuidv4() : searchId.split("-").pop();
+      const finalId = searchId.includes("new/") ? (data.finalId || uuidv4()) : searchId.split("-").pop();
+
       if (searchId.startsWith("ai/")) {
         navigate(`/search/ai/${querySlug}-${finalId}?query=${encodeURIComponent(query)}`);
       } else {
@@ -269,221 +339,269 @@ function App() {
     }
   };
 
-  useEffect(() => {
-    const query = new URLSearchParams(location.search).get("query");
-    if (id && query) {
-      handleUrlSearch(query, id);
-    } else if (location.pathname === "/search") {
-      setResponse(null);
-      setPrompt("");
-      setMode("search");
-      setError("");
-    }
-  }, [id, location.search, location.pathname]);
+  // ── WORKFLOW CARDS ───────────────────────────────────────────────────────
+  const workflowCards = [
+    {
+      title: "Alumni Details",
+      promptTemplate: "help me find 10 people who went to {{school}} in the last few years who now work at {{company}}",
+    },
+    {
+      title: "YC Company Founders Details",
+      promptTemplate: "do a deep dive on founders of YC company: {{company}}",
+      isCompanyWorkflow: true,
+    },
+    {
+      title: "Antler Company Founder Details",
+      promptTemplate: "do a deep dive on founders of Antler company: {{company}}",
+      isCompanyWorkflow: true,
+    },
+    {
+      title: "YC Company Details",
+      promptTemplate: "Tell me about what this YC company called {{company}} does",
+      isCompanyWorkflow: true,
+    },
+    {
+      title: "Antler Company Details",
+      promptTemplate: "Tell me about what this Antler company called {{company}} does",
+      isCompanyWorkflow: true,
+    },
+    {
+      title: "LinkedIn Viral Post Research",
+      promptTemplate: "Tell a viral post by {{person name}} on LinkedIn",
+    },
+    {
+      title: "Reddit Viral Post Research",
+      promptTemplate: "Tell me about a viral post on Reddit about {{person name}}",
+    },
+    {
+      title: "Email Draft",
+      promptTemplate: "Draft me a email for {{subject}}",
+    },
+    {
+      title: "College Comparison",
+      promptTemplate: "Compare colleges {{college 1}} and {{college 2}} and tell me which is overall better",
+    },
+    {
+      title: "Country Comparison to Settle",
+      promptTemplate: "Country comparison to settle between {{country 1}} and {{country 2}}",
+    },
+    {
+      title: "University Comparison Abroad",
+      promptTemplate:
+        "Comparison between universities abroad: Compare university {{university 1}} and {{university 2}} and tell me which is overall better",
+    },
+    {
+      title: "Best Faculties at College",
+      promptTemplate: "Some of the best faculties at {{college name}} in {{department}} at {{campus}}",
+    },
+    {
+      title: "Best Faculties at School",
+      promptTemplate: "Some of the best faculties at {{school}} in {{city}} for {{subject}}",
+    },
+    {
+      title: "Best Coaching Institutes",
+      promptTemplate: "Best coaching institutes to prepare for {{exam}}",
+    },
+    {
+      title: "Best Restaurant in City",
+      promptTemplate: "Best restaurant in city {{city}}",
+    },
+  ];
 
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem("theme", theme);
-  }, [theme]);
+  // ── COMPANY SEARCH PAGE ──────────────────────────────────────────────────
+  if (location.pathname === "/companysearch") {
+    const workflowTitle = location.state?.workflowTitle || "Company Details";
+    const promptTemplate = location.state?.promptTemplate || "";
 
-  const toggleTheme = () => {
-    setTheme(theme === "light" ? "dark" : "light");
-  };
-
-  const handleSuggestionClick = (suggestion) => {
-    setPrompt(suggestion);
-    handleSubmit(null, suggestion, mode);
-  };
-
-  const makeCitationsClickable = (text, citations) => {
-    if (!text) return "No content available";
-    if (!citations?.length) return text;
-    return text.replace(/\[(\d+)\]/g, (match, p1) => {
-      const citation = citations.find((c) => c.id.toString() === p1);
-      return citation
-        ? `<a href="${citation.url}" target="_blank" rel="noopener noreferrer"><sup className="citation">[${p1}]</sup></a>`
-        : `<sup className="citation">${match}</sup>`;
-    });
-  };
-
-  const toggleModelDropdown = () => setIsModelDropdownOpen(!isModelDropdownOpen);
-  const selectModel = (model) => {
-    setSelectedModel(model);
-    setIsModelDropdownOpen(false);
-  };
-  const showTab = (tabId) => {
-    setActiveTab(tabId);
-  };
-
-  const queryParam = new URLSearchParams(location.search).get("query");
-
-  const handleAutomateWorkflows = async () => {
-    if (!user?.id) {
-      alert("Please sign in to use this feature");
-      return;
-    }
-    try {
-      const res = await fetch("/api/automate-workflows", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-user-id": user.id,
-        },
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || "Failed to access workflows");
+    const handleGo = () => {
+      if (!companyInput.trim()) {
+        alert("Please enter company name");
         return;
       }
-      navigate("/workflows");
-      setIsProfileSidebarOpen(false);
-    } catch (err) {
-      console.error("Automate workflows error:", err);
-      alert("Something went wrong. Please try again later.");
-    }
-  };
+      const fullPrompt = promptTemplate.replace("{{company}}", companyInput.trim());
+      navigate("/search", { state: { prefillPrompt: fullPrompt } });
+    };
 
-  // ── WORKFLOWS PAGE ───────────────────────────────────────────────────────
-  if (location.pathname === "/workflows") {
-    const workflowCards = [
-      { title: "Alumni Details", description: "Find 10 people who went to a school in recent years and now work at a company", example: "school = IIT Bombay, company = Google" },
-      { title: "YC Company Founders Details", description: "Deep dive on founders of a YC company", example: "company = Stripe" },
-      { title: "Antler Company Founder Details", description: "Deep dive on founders of an Antler company", example: "company = ..." },
-      { title: "YC Company Details", description: "What this YC company does", example: "company = Airbnb" },
-      { title: "Antler Company Details", description: "What this Antler company does", example: "company = ..." },
-      { title: "LinkedIn Viral Post Research", description: "Find a viral post by someone on LinkedIn", example: "person = Ankur Warikoo" },
-      { title: "Reddit Viral Post Research", description: "Find viral Reddit post about someone", example: "person = Elon Musk" },
-      { title: "Email Draft", description: "Draft professional email", example: "subject = Job application follow-up" },
-      { title: "College Comparison", description: "Compare two colleges and tell which is better overall", example: "college1 = IIT Delhi, college2 = NIT Trichy" },
-      { title: "Country Comparison to Settle", description: "Compare two countries for settling down", example: "country1 = Canada, country2 = Australia" },
-      { title: "University Abroad Comparison", description: "Compare two universities abroad", example: "university1 = MIT, university2 = Stanford" },
-    ];
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-12 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-12">
-            <h1 className="text-4xl sm:text-5xl font-bold text-gray-900 dark:text-white mb-4">Workflow Automation</h1>
-            <p className="text-lg sm:text-xl text-gray-600 dark:text-gray-400 max-w-3xl mx-auto">
-              Choose a ready-made AI workflow to get automated research, comparisons, drafts and more.
-            </p>
-          </div>
-          <div className="text-center mb-10">
-            <button onClick={() => navigate("/search")} className="inline-flex items-center gap-2 px-6 py-3 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 font-medium rounded-lg transition shadow-sm">
-              ← Back to Search
+        <div className="max-w-2xl mx-auto">
+          <div className="text-center mb-8">
+            <button
+              onClick={() => navigate("/workflows")}
+              className="inline-flex items-center gap-2 px-6 py-3 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 font-medium rounded-lg transition shadow-sm"
+            >
+              ← Back to Workflows
             </button>
           </div>
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8">
-            {workflowCards.map((card, index) => (
-              <div key={index} className="bg-white dark:bg-gray-800 rounded-2xl p-6 shadow-lg hover:shadow-2xl transition-all cursor-pointer border border-gray-200 dark:border-gray-700"
-                onClick={() => alert(`Selected workflow: ${card.title}\n\nDescription: ${card.description}\nExample: ${card.example}\n\n(Implementation in progress)`)}>
-                <h3 className="text-xl font-semibold mb-3 text-gray-900 dark:text-white">{card.title}</h3>
-                <p className="text-gray-600 dark:text-gray-300 mb-4">{card.description}</p>
-                <p className="text-sm text-indigo-600 dark:text-indigo-400 italic">e.g. {card.example}</p>
-              </div>
-            ))}
+
+          <div className="bg-white dark:bg-gray-800 rounded-3xl p-8 shadow-xl">
+            <h1 className="text-4xl font-bold text-center mb-4 text-gray-900 dark:text-white">
+              {workflowTitle}
+            </h1>
+            <p className="text-center text-gray-600 dark:text-gray-400 mb-8">
+              Enter the company name below
+            </p>
+
+            <div className="mb-6">
+              <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">
+                Company Name
+              </label>
+              <input
+                type="text"
+                value={companyInput}
+                onChange={(e) => setCompanyInput(e.target.value)}
+                placeholder="e.g. Stripe, Airbnb, OpenAI, Razorpay, Cred"
+                className="w-full px-5 py-4 text-lg border border-gray-300 dark:border-gray-600 rounded-2xl focus:outline-none focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                onKeyDown={(e) => e.key === "Enter" && handleGo()}
+              />
+            </div>
+
+            <button
+              onClick={handleGo}
+              disabled={!companyInput.trim()}
+              className="w-full py-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold rounded-2xl text-lg transition-all"
+            >
+              Generate Query & Go to Search →
+            </button>
           </div>
-          <p className="text-center mt-12 text-sm text-gray-500 dark:text-gray-400">
-            More workflows coming soon • Some may require PRO or ULTRA plan in future
-          </p>
         </div>
       </div>
     );
   }
 
-  // ── PRICING PAGE ─────────────────────────────────────────────────────────
+  // ── WORKFLOWS PAGE ───────────────────────────────────────────────────────
+  if (location.pathname === "/workflows") {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-12 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-6xl mx-auto">
+          <h1 className="text-4xl sm:text-5xl font-bold text-center mb-4 text-gray-900 dark:text-white">
+            Workflow Automation
+          </h1>
+          <p className="text-center text-lg text-gray-600 dark:text-gray-400 mb-12 max-w-3xl mx-auto">
+            Click any card to load the ready-made prompt in the search box. Just replace the{" "}
+            <code className="font-mono bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-sm">
+              {"{{placeholders}}"}
+            </code>{" "}
+            and press Enter.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
+            {workflowCards.map((card, index) => (
+              <div
+                key={index}
+                onClick={() => {
+                  if (card.isCompanyWorkflow) {
+                    navigate("/companysearch", {
+                      state: { workflowTitle: card.title, promptTemplate: card.promptTemplate },
+                    });
+                  } else {
+                    navigate("/search", { state: { prefillPrompt: card.promptTemplate } });
+                  }
+                }}
+                className="bg-white dark:bg-gray-800 rounded-3xl p-6 sm:p-8 shadow-lg hover:shadow-2xl transition-all duration-300 cursor-pointer border border-gray-100 dark:border-gray-700 hover:border-blue-500 dark:hover:border-blue-600 group"
+              >
+                <h3 className="text-xl sm:text-2xl font-semibold mb-4 text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                  {card.title}
+                </h3>
+                <p className="text-sm text-gray-500 dark:text-gray-400 italic break-words">
+                  {card.promptTemplate}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-16 text-center">
+            <button
+              onClick={() => navigate("/search")}
+              className="px-8 py-4 bg-gray-700 hover:bg-gray-800 text-white font-medium rounded-2xl text-lg transition shadow-lg"
+            >
+              Back to Search →
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── PRICING PAGE ────────────────────────────────────────────────────────
   if (location.pathname === "/pricing") {
     const plans = [
-      { name: "FREE", price: 0, period: "Lifetime", features: ["100 AI Credits", "1 Credit = 1,000 tokens", "Basic support"], popular: false, buttonText: "Current Plan", disabled: true },
-      { name: "PRO", price: 999, period: "per month", features: ["1,000 AI Credits / month", "1 Credit = 1,000 tokens", "Faster responses", "Priority support"], popular: true, buttonText: "Upgrade to PRO", disabled: false },
-      { name: "ULTRA", price: 3999, period: "per month", features: ["5,000 AI Credits / month", "1 Credit = 1,000 tokens", "Ultra fast", "Dedicated support"], popular: false, buttonText: "Upgrade to ULTRA", disabled: false },
+      {
+        name: "FREE",
+        price: 0,
+        period: "Forever",
+        features: [
+          "50 generations per month",
+          "Basic AI model (gpt-4o-mini)",
+          "Standard web search",
+          "Voice input",
+        ],
+        buttonText: "Current Plan",
+        disabled: true,
+      },
+      {
+        name: "PRO",
+        price: 999,
+        period: "per month",
+        features: [
+          "Unlimited generations",
+          "Advanced model (gpt-4o)",
+          "Deeper web search (8 results)",
+          "Priority support",
+          "Save & organize searches",
+        ],
+        buttonText: "Upgrade to PRO",
+        popular: true,
+      },
+      {
+        name: "ULTRA",
+        price: 3999,
+        period: "per month",
+        features: [
+          "Everything in PRO",
+          "Highest model access",
+          "Advanced workflows",
+          "Team collaboration (soon)",
+          "API access (soon)",
+        ],
+        buttonText: "Upgrade to ULTRA",
+      },
     ];
 
-    const loadRazorpay = () => {
-      return new Promise((resolve) => {
-        if (window.Razorpay) return resolve();
-        const script = document.createElement("script");
-        script.src = "https://checkout.razorpay.com/v1/checkout.js";
-        script.onload = resolve;
-        document.body.appendChild(script);
-      });
-    };
-
-    const handleUpgrade = async (plan) => {
+    const handleUpgrade = (plan) => {
       if (plan.name === "FREE") return;
-      try {
-        const res = await fetch("/api/create-razorpay-order", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-user-id": user?.id || "" },
-          body: JSON.stringify({ planName: plan.name }),
-        });
-        const { order } = await res.json();
-        if (!order?.id) {
-          alert("Failed to start payment");
-          return;
-        }
-        await loadRazorpay();
-        const options = {
-          key: process.env.RAZORPAY_KEY_ID,
-          amount: order.amount,
-          currency: order.currency,
-          name: "Web Explore",
-          description: `Upgrade to ${plan.name} Plan`,
-          order_id: order.id,
-          handler: async function (response) {
-            const verifyRes = await fetch("/api/verify-razorpay-payment", {
-              method: "POST",
-              headers: { "Content-Type": "application/json", "x-user-id": user?.id || "" },
-              body: JSON.stringify({
-                razorpay_order_id: response.razorpay_order_id,
-                razorpay_payment_id: response.razorpay_payment_id,
-                razorpay_signature: response.razorpay_signature,
-                planName: plan.name,
-              }),
-            });
-            const verifyData = await verifyRes.json();
-            if (verifyData.success) {
-              alert(`Payment successful! Upgraded to ${plan.name}`);
-              navigate("/search");
-              window.location.reload();
-            } else {
-              alert("Payment verification failed");
-            }
-          },
-          prefill: { name: user.name || "", email: user.email || "" },
-          theme: { color: "#6b7280" },
-        };
-        const rzp = new window.Razorpay(options);
-        rzp.open();
-      } catch (err) {
-        console.error(err);
-        alert("Something went wrong while starting payment");
-      }
+      alert(`Upgrading to ${plan.name} – Razorpay flow would start here`);
     };
 
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-12 px-4 sm:px-6 lg:px-8">
         <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-12">
-            <h1 className="text-4xl sm:text-5xl font-bold text-gray-900 dark:text-white mb-4">Choose Your Plan</h1>
-            <p className="text-lg sm:text-xl text-gray-600 dark:text-gray-400 max-w-2xl mx-auto">
-              Unlock more tokens, advanced models and priority access
-            </p>
-          </div>
-          <div className="text-center mb-8">
-            <button onClick={() => navigate("/search")} className="inline-flex items-center gap-2 px-6 py-3 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 font-medium rounded-lg transition shadow-sm">
-              ← Back to Search
-            </button>
-          </div>
-          <div className="grid md:grid-cols-3 gap-6 lg:gap-8">
+          <h1 className="text-4xl sm:text-5xl font-bold text-center mb-4 text-gray-900 dark:text-white">
+            Choose Your Plan
+          </h1>
+          <p className="text-center text-lg text-gray-600 dark:text-gray-400 mb-12">
+            Unlock more power. Cancel anytime.
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 sm:gap-8 relative">
             {plans.map((plan) => (
-              <div key={plan.name} className={`relative bg-white dark:bg-gray-800 rounded-3xl p-6 sm:p-8 shadow-xl transition-all hover:shadow-2xl ${plan.popular ? "ring-4 ring-gray-400 scale-105 md:scale-110" : "border border-gray-200 dark:border-gray-700"}`}>
-                {plan.popular && <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-gray-700 text-white text-xs sm:text-sm font-bold px-5 py-1 rounded-full">MOST POPULAR</div>}
-                <h2 className="text-2xl sm:text-3xl font-bold text-center mb-3 text-gray-800 dark:text-white">{plan.name}</h2>
+              <div
+                key={plan.name}
+                className={`pricing-card relative bg-white dark:bg-gray-800 rounded-3xl p-6 sm:p-8 shadow-xl border ${
+                  plan.popular ? "border-blue-500 scale-105 z-10" : "border-gray-200 dark:border-gray-700"
+                }`}
+              >
+                {plan.popular && <div className="popular-badge">Most Popular</div>}
+                <h3 className="text-2xl font-bold text-center mb-6 text-gray-900 dark:text-white">
+                  {plan.name}
+                </h3>
                 <div className="text-center mb-6 sm:mb-8">
                   <span className="text-4xl sm:text-6xl font-bold text-gray-800 dark:text-gray-200">
                     {plan.price === 0 ? "Free" : `₹${plan.price}`}
                   </span>
-                  <span className="text-base sm:text-lg text-gray-500 dark:text-gray-400 block">{plan.period}</span>
+                  <span className="text-base sm:text-lg text-gray-500 dark:text-gray-400 block">
+                    {plan.period}
+                  </span>
                 </div>
                 <ul className="space-y-3 sm:space-y-4 mb-8 sm:mb-10 text-gray-700 dark:text-gray-300">
                   {plan.features.map((feature, i) => (
@@ -493,12 +611,21 @@ function App() {
                     </li>
                   ))}
                 </ul>
-                <button onClick={() => handleUpgrade(plan)} disabled={plan.disabled} className={`w-full py-3 sm:py-4 rounded-2xl font-bold text-base sm:text-lg transition-all ${plan.disabled ? "bg-gray-300 dark:bg-gray-700 text-gray-700 cursor-not-allowed" : "bg-gray-700 hover:bg-gray-800 text-white"}`}>
+                <button
+                  onClick={() => handleUpgrade(plan)}
+                  disabled={plan.disabled}
+                  className={`w-full py-3 sm:py-4 rounded-2xl font-bold text-base sm:text-lg transition-all ${
+                    plan.disabled
+                      ? "bg-gray-300 dark:bg-gray-700 text-gray-700 cursor-not-allowed"
+                      : "bg-gray-700 hover:bg-gray-800 text-white"
+                  }`}
+                >
                   {plan.buttonText}
                 </button>
               </div>
             ))}
           </div>
+
           <p className="text-center mt-10 sm:mt-16 text-sm sm:text-base text-gray-500 dark:text-gray-400">
             Cancel anytime • Secure payment • Questions? Contact support
           </p>
@@ -507,13 +634,11 @@ function App() {
     );
   }
 
-  // ── HOME / LANDING PAGE ──────────────────────────────────────────────────
+  // ── HOME / LANDING PAGE ─────────────────────────────────────────────────
   if (location.pathname === "/") {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-900 p-6">
-        <h1 className={`${doodle.className} text-6xl sm:text-8xl mb-6`}>
-          {doodle.text}
-        </h1>
+        <h1 className={`${doodle.className} text-6xl sm:text-8xl mb-6`}>{doodle.text}</h1>
         <p className="text-xl sm:text-2xl text-gray-600 dark:text-gray-300 mb-10 text-center max-w-2xl">
           Discover Answers with Web Explore – Ask anything, get instant results
         </p>
@@ -527,7 +652,9 @@ function App() {
     );
   }
 
-  // ── MAIN SEARCH UI ───────────────────────────────────────────────────────
+  // ── MAIN SEARCH UI ──────────────────────────────────────────────────────
+  const queryParam = new URLSearchParams(location.search).get("query");
+
   return (
     <div className="searchpage min-h-screen">
       {/* Sidebar */}
@@ -553,9 +680,12 @@ function App() {
         </button>
       </div>
 
-      {/* Profile Sidebar */}
+      {/* Profile Sidebar - SIGN OUT BUTTON COLOR FIXED */}
       <div className={`profile-sidebar ${isProfileSidebarOpen ? "open" : ""}`}>
-        <button className="absolute top-4 right-4 p-2 bg-gray-300 rounded-full hover:bg-gray-400" onClick={() => setIsProfileSidebarOpen(false)}>
+        <button
+          className="absolute top-4 right-4 p-2 bg-gray-300 rounded-full hover:bg-gray-400"
+          onClick={() => setIsProfileSidebarOpen(false)}
+        >
           <X size={24} />
         </button>
         <h2 className="text-2xl font-semibold mb-6 border-b pb-2">Profile</h2>
@@ -565,13 +695,32 @@ function App() {
             <p className="text-xl font-medium">{user.name}</p>
             <p className="text-sm text-gray-600">{user.email}</p>
             <p className="text-sm font-medium text-blue-600">Current Plan: FREE</p>
-            <button onClick={() => { navigate("/pricing"); setIsProfileSidebarOpen(false); }} className="w-full bg-gray-600 hover:bg-gray-700 text-white py-3 rounded-lg">
+
+            <button
+              onClick={() => {
+                navigate("/pricing");
+                setIsProfileSidebarOpen(false);
+              }}
+              className="w-full bg-gray-600 hover:bg-gray-700 text-white py-3 rounded-lg"
+            >
               Upgrade Plan
             </button>
-            <button onClick={handleAutomateWorkflows} className="w-full bg-gray-600 hover:bg-gray-700 text-white py-3 rounded-lg font-medium shadow-md transition-all flex items-center justify-center gap-2">
+
+            <button
+              onClick={handleAutomateWorkflows}
+              className="w-full bg-gray-600 hover:bg-gray-700 text-white py-3 rounded-lg font-medium shadow-md transition-all flex items-center justify-center gap-2"
+            >
               <Zap size={18} /> Automate Workflows
             </button>
-            <button className="w-full bg-red-600 hover:bg-red-700 text-white py-3 rounded-lg" onClick={() => { localStorage.removeItem("user"); window.location.replace("/"); }}>
+
+            {/* Changed from red to gray to match the other buttons */}
+            <button
+              className="w-full bg-gray-600 hover:bg-gray-700 text-white py-3 rounded-lg"
+              onClick={() => {
+                localStorage.removeItem("user");
+                window.location.replace("/");
+              }}
+            >
               Sign Out
             </button>
           </div>
@@ -609,7 +758,11 @@ function App() {
                         ))}
                       </div>
                     </div>
-                    <button className="input-btn" onClick={() => setMode(mode === "search" ? "ai" : "search")} title={modes.find((m) => m.key !== mode)?.label}>
+                    <button
+                      className="input-btn"
+                      onClick={() => setMode(mode === "search" ? "ai" : "search")}
+                      title={modes.find((m) => m.key !== mode)?.label}
+                    >
                       <Globe size={12} />
                     </button>
                     <button className={`input-btn ${listening ? "bg-red-500" : ""}`} onClick={handleMicClick}>
@@ -637,17 +790,30 @@ function App() {
                 </h1>
               )}
               <div className="tabs flex gap-3 mb-6">
-                <button className={`tab ${activeTab === "answer" ? "active" : ""}`} onClick={() => showTab("answer")}>Answer</button>
-                <button className={`tab ${activeTab === "sources" ? "active" : ""}`} onClick={() => showTab("sources")}>Sources</button>
+                <button className={`tab ${activeTab === "answer" ? "active" : ""}`} onClick={() => showTab("answer")}>
+                  Answer
+                </button>
+                <button className={`tab ${activeTab === "sources" ? "active" : ""}`} onClick={() => showTab("sources")}>
+                  Sources
+                </button>
               </div>
               <div className="content">
                 <div className={`content-section ${activeTab === "answer" ? "block" : "hidden"}`}>
-                  <p dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(makeCitationsClickable(response.summary || "No answer available", response.citations || []), { ADD_ATTR: ["target", "rel"] }) }} />
+                  <p
+                    dangerouslySetInnerHTML={{
+                      __html: DOMPurify.sanitize(
+                        makeCitationsClickable(response.summary || "No answer available", response.citations || []),
+                        { ADD_ATTR: ["target", "rel"] }
+                      ),
+                    }}
+                  />
                   {response.suggestions?.length > 0 && (
                     <div className="follow-up mt-6">
                       <h3>People also ask</h3>
                       {response.suggestions.map((s, i) => (
-                        <button key={i} onClick={() => handleSuggestionClick(s)}>{s}</button>
+                        <button key={i} onClick={() => handleSuggestionClick(s)}>
+                          {s}
+                        </button>
                       ))}
                     </div>
                   )}
@@ -656,7 +822,9 @@ function App() {
                   <ul>
                     {response.citations?.map((src, i) => (
                       <li key={i} className="source-item">
-                        <a href={src.url} target="_blank" rel="noopener noreferrer">{src.title || src.url}</a>
+                        <a href={src.url} target="_blank" rel="noopener noreferrer">
+                          {src.title || src.url}
+                        </a>
                       </li>
                     ))}
                   </ul>
@@ -672,12 +840,21 @@ function App() {
                   {decodeURIComponent(queryParam)}
                 </h1>
               )}
-              <p dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(makeCitationsClickable(response.text || "No response available", response.citations || []), { ADD_ATTR: ["target", "rel"] }) }} />
+              <p
+                dangerouslySetInnerHTML={{
+                  __html: DOMPurify.sanitize(
+                    makeCitationsClickable(response.text || "No response available", []),
+                    { ADD_ATTR: ["target", "rel"] }
+                  ),
+                }}
+              />
               {response.suggestions?.length > 0 && (
                 <div className="follow-up mt-6">
                   <h3>People also ask</h3>
                   {response.suggestions.map((s, i) => (
-                    <button key={i} onClick={() => handleSuggestionClick(s)}>{s}</button>
+                    <button key={i} onClick={() => handleSuggestionClick(s)}>
+                      {s}
+                    </button>
                   ))}
                 </div>
               )}
