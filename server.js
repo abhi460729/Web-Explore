@@ -69,7 +69,7 @@ const __dirname = path.dirname(__filename);
 
 // ── MIDDLEWARE ────────────────────────────────────────────────────────────
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:8080'],
+  origin: ['http://localhost:5173', 'http://localhost:8080', 'https://web-explore-651093528570.asia-southeast1.run.app'],
   credentials: true,
   methods: ['GET', 'POST', 'OPTIONS', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-user-id']
@@ -354,12 +354,12 @@ app.get("/api/google/auth", async (req, res) => {
   }
 
   try {
-    const redirectUri = `${req.protocol}://${req.get('host')}/api/google/callback`;
+    const redirectUri = process.env.GOOGLE_REDIRECT_URI;
 
     const oauth2Client = new OAuth2Client(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
-      redirectUri
+      process.env.GOOGLE_REDIRECT_URI
     );
 
     const authorizeUrl = oauth2Client.generateAuthUrl({
@@ -398,11 +398,11 @@ app.get("/api/google/callback", async (req, res) => {
   const { userId, tool } = parsedState;
 
   try {
-    const redirectUri = `${req.protocol}://${req.get('host')}/api/google/callback`;
+    const redirectUri = process.env.GOOGLE_REDIRECT_URI;
     const oauth2Client = new OAuth2Client(
       process.env.GOOGLE_CLIENT_ID,
       process.env.GOOGLE_CLIENT_SECRET,
-      redirectUri
+      process.env.GOOGLE_REDIRECT_URI
     );
 
     const { tokens } = await oauth2Client.getToken(code);
