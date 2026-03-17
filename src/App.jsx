@@ -63,7 +63,7 @@ function App() {
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("answer");
   const [theme, setTheme] = useState(localStorage.getItem("theme") || "light");
-  const [values, setValues] = useState({}); // for workflow input fields
+  const [values, setValues] = useState({});
 
   const user = JSON.parse(localStorage.getItem("user") || "{}");
 
@@ -205,6 +205,39 @@ function App() {
       promptTemplate: "Best restaurant in city {{city}}",
       fields: [
         { key: "city", label: "City Name", placeholder: "e.g. Mumbai, Bangalore, Ahmedabad", required: true }
+      ]
+    },
+    {
+      title: "Email Follow-Up Automation",
+      slug: "email-followup",
+      promptTemplate: "When I get a customer reply to my outbound email in Gmail, automatically analyze it and handle the follow-up: if positive interest send calendar invite, if question answer it, if no interest mark as closed - Gmail",
+      fields: [
+        { key: "gmail_label", label: "Gmail Label to Monitor (optional)", placeholder: "e.g. Outbound Leads", required: false }
+      ]
+    },
+    {
+      title: "Project Reminders",
+      slug: "project-reminders",
+      promptTemplate: "From the latest email about {{task subject}}, create project tasks, deadlines and reminders in Google Calendar for the team",
+      fields: [
+        { key: "task subject", label: "Task / Project Subject", placeholder: "e.g. Website Redesign, Client Onboarding", required: true }
+      ]
+    },
+    {
+      title: "Research Competitors",
+      slug: "research-competitors",
+      promptTemplate: "Research my main competitors {{competitor names}} and create a detailed Google Doc report with their strengths, weaknesses, pricing, recent news and possible future plans",
+      fields: [
+        { key: "competitor names", label: "Competitor Names (comma separated)", placeholder: "e.g. Canva, Figma, Notion", required: true }
+      ]
+    },
+    {
+      title: "Personalized Pitch Emails",
+      slug: "pitch-emails",
+      promptTemplate: "I have a Google Sheet with potential investors (columns: Name, Email, Focus Areas). Draft personalized cold pitch emails for each one highlighting why my startup fits their investment thesis - Gmail + Google Sheets",
+      fields: [
+        { key: "sheet_url", label: "Google Sheet URL", placeholder: "https://docs.google.com/spreadsheets/d/...", required: true },
+        { key: "startup_name", label: "Your Startup Name", placeholder: "e.g. Taskify AI", required: true }
       ]
     }
   ];
@@ -443,9 +476,6 @@ function App() {
     }
   };
 
-  // ──────────────────────────────────────────────
-  // GENERIC WORKFLOW INPUT PAGE (replaces old /companysearch style)
-  // ──────────────────────────────────────────────
   if (location.pathname.startsWith("/workflow-input/")) {
     const slug = location.pathname.replace("/workflow-input/", "");
     const workflow = workflowCards.find((w) => w.slug === slug);
@@ -536,9 +566,6 @@ function App() {
     );
   }
 
-  // ──────────────────────────────────────────────
-  // WORKFLOWS PAGE
-  // ──────────────────────────────────────────────
   if (location.pathname === "/workflows") {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-12 px-4 sm:px-6 lg:px-8">
@@ -584,9 +611,6 @@ function App() {
     );
   }
 
-  // ──────────────────────────────────────────────
-  // PRICING PAGE (original)
-  // ──────────────────────────────────────────────
   if (location.pathname === "/pricing") {
     const plans = [
       {
@@ -796,9 +820,6 @@ function App() {
     );
   }
 
-  // ──────────────────────────────────────────────
-  // HOME / LANDING PAGE
-  // ──────────────────────────────────────────────
   if (location.pathname === "/") {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-900 p-6">
@@ -816,9 +837,6 @@ function App() {
     );
   }
 
-  // ──────────────────────────────────────────────
-  // MAIN SEARCH PAGE
-  // ──────────────────────────────────────────────
   const queryParam = new URLSearchParams(location.search).get("query");
 
   return (

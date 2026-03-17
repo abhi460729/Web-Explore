@@ -35,6 +35,10 @@ model User {
   queryHistory       QueryHistory[]
   accounts           Account[]
   sessions           Session[]
+  gmailTokens        Json?
+  calendarTokens     Json?
+  docsTokens         Json?
+  sheetsTokens       Json?
 }
 
 model Plan {

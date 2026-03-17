@@ -1,12 +1,13 @@
-// server.js - Updated with receipt length fix + workflows endpoint without usage check
+// server.js - Updated with Google OAuth for tools (Gmail, Calendar, Docs, Sheets)
 
 import { config } from "dotenv";
 config();
 
-// Early env check with more details
+// Early env check
 console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 console.log("Environment variables loaded:");
 console.log("GOOGLE_CLIENT_ID:", process.env.GOOGLE_CLIENT_ID ? process.env.GOOGLE_CLIENT_ID.substring(0, 10) + "..." : "MISSING / EMPTY");
+console.log("GOOGLE_CLIENT_SECRET:", process.env.GOOGLE_CLIENT_SECRET ? "Yes (present)" : "MISSING ← REQUIRED for OAuth");
 console.log("RAZORPAY_KEY_ID:", process.env.RAZORPAY_KEY_ID ? process.env.RAZORPAY_KEY_ID.substring(0, 12) + "..." : "MISSING");
 console.log("RAZORPAY_KEY_SECRET:", process.env.RAZORPAY_KEY_SECRET ? "Yes (length: " + process.env.RAZORPAY_KEY_SECRET.length + ")" : "MISSING");
 console.log("TAVILY_API_KEY:", process.env.TAVILY_API_KEY ? "Yes" : "MISSING");
@@ -32,31 +33,33 @@ import prismaPkg from '@prisma/client';
 const { PrismaClient } = prismaPkg;
 const prisma = new PrismaClient();
 
-// Razorpay Instance with debug
+// Razorpay Instance
 const razorpayInstance = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET,
 });
 
-console.log("Razorpay SDK Initialized:");
-if (!process.env.RAZORPAY_KEY_ID || !process.env.RAZORPAY_KEY_SECRET) {
-  console.log("❌ ERROR: RAZORPAY_KEY_ID or KEY_SECRET missing in .env");
-} else if (process.env.RAZORPAY_KEY_ID.startsWith('rzp_live_')) {
-  console.log("✅ LIVE MODE active (rzp_live_ key detected)");
-} else if (process.env.RAZORPAY_KEY_ID.startsWith('rzp_test_')) {
-  console.log("⚠️ TEST MODE active (rzp_test_ key detected)");
-} else {
-  console.log("⚠️ UNKNOWN MODE – key doesn't start with rzp_test_ or rzp_live_");
-}
-console.log("Key ID (partial):", process.env.RAZORPAY_KEY_ID?.substring(0, 12) + "..." || "N/A");
-console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  console.log('Shutting down Prisma...');
-  await prisma.$disconnect();
-  process.exit(0);
-});
+// Google OAuth Scopes for different tools
+const TOOL_SCOPES = {
+  gmail: [
+    'https://www.googleapis.com/auth/gmail.readonly',
+    'https://www.googleapis.com/auth/gmail.send',
+    'https://www.googleapis.com/auth/gmail.modify',
+    'https://www.googleapis.com/auth/gmail.settings.basic'
+  ],
+  calendar: [
+    'https://www.googleapis.com/auth/calendar',
+    'https://www.googleapis.com/auth/calendar.events'
+  ],
+  docs: [
+    'https://www.googleapis.com/auth/documents',
+    'https://www.googleapis.com/auth/drive.file'
+  ],
+  sheets: [
+    'https://www.googleapis.com/auth/spreadsheets',
+    'https://www.googleapis.com/auth/drive.file'
+  ]
+};
 
 const app = express();
 const port = process.env.PORT || 8080;
@@ -100,7 +103,7 @@ function createQuerySlug(query) {
 }
 
 // Simple in-memory per-user throttle (5 sec cooldown)
-const userLastRequest = new Map(); // userId → timestamp
+const userLastRequest = new Map();
 
 // ── Usage & Plan limit middleware ─────────────────────────────────────────
 async function checkUsageAndPlan(req, res, next) {
@@ -191,7 +194,7 @@ async function checkUsageAndPlan(req, res, next) {
   }
 }
 
-// ── Razorpay Order Creation Endpoint (receipt length fixed) ───────────────
+// ── Razorpay Order Creation Endpoint ───────────────
 app.post("/api/create-razorpay-order", async (req, res) => {
   const userId = req.headers["x-user-id"];
   if (!userId) {
@@ -204,8 +207,8 @@ app.post("/api/create-razorpay-order", async (req, res) => {
   }
 
   const planAmounts = {
-    PRO: 999 * 100,     // ₹999 → 99900 paise
-    ULTRA: 3999 * 100,  // ₹3999 → 399900 paise
+    PRO: 999 * 100,
+    ULTRA: 3999 * 100,
   };
 
   const amount = planAmounts[planName];
@@ -291,7 +294,7 @@ app.post("/api/verify-razorpay-payment", async (req, res) => {
   }
 });
 
-// ── Google Auth ────────────────────────────────────────────────────────────
+// ── Google Login ────────────────────────────────────────────────────────────
 app.post("/api/auth/google", async (req, res) => {
   const { token } = req.body;
   try {
@@ -337,6 +340,102 @@ app.post("/api/auth/google", async (req, res) => {
   } catch (err) {
     console.error("Google auth error:", err);
     res.status(401).json({ error: "Authentication failed" });
+  }
+});
+
+// ── Google Tool Connect (OAuth flow for specific tools) ────────────────────
+app.get("/api/google/auth", async (req, res) => {
+  const userId = req.headers["x-user-id"];
+  const tool = req.query.tool?.toLowerCase();
+
+  if (!userId) return res.status(401).json({ error: "Unauthorized - user ID missing" });
+  if (!tool || !TOOL_SCOPES[tool]) {
+    return res.status(400).json({ error: "Invalid or missing tool parameter" });
+  }
+
+  try {
+    const redirectUri = `${req.protocol}://${req.get('host')}/api/google/callback`;
+
+    const oauth2Client = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      redirectUri
+    );
+
+    const authorizeUrl = oauth2Client.generateAuthUrl({
+      access_type: 'offline',
+      scope: TOOL_SCOPES[tool],
+      state: JSON.stringify({ userId, tool }),
+      prompt: 'consent',
+    });
+
+    res.json({ authUrl: authorizeUrl });
+  } catch (err) {
+    console.error("Failed to generate Google auth URL:", err);
+    res.status(500).json({ error: "Failed to generate authorization URL" });
+  }
+});
+
+// ── Google OAuth Callback ─────────────────────────────────────────────────
+app.get("/api/google/callback", async (req, res) => {
+  const { code, state, error } = req.query;
+
+  if (error) {
+    return res.status(400).send(`<h1>Authentication failed: ${error}</h1>`);
+  }
+
+  if (!code) {
+    return res.status(400).send("<h1>No authorization code received</h1>");
+  }
+
+  let parsedState;
+  try {
+    parsedState = JSON.parse(state);
+  } catch {
+    return res.status(400).send("<h1>Invalid state parameter</h1>");
+  }
+
+  const { userId, tool } = parsedState;
+
+  try {
+    const redirectUri = `${req.protocol}://${req.get('host')}/api/google/callback`;
+    const oauth2Client = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      redirectUri
+    );
+
+    const { tokens } = await oauth2Client.getToken(code);
+
+    // Update user with tool-specific tokens
+    const updateData = {};
+    updateData[`${tool}Tokens`] = tokens;
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: updateData,
+    });
+
+    // Success page with auto-close for popup
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head><title>Connected Successfully</title></head>
+      <body style="font-family:sans-serif; text-align:center; padding:80px 20px;">
+        <h1 style="color:#10b981;">${tool.toUpperCase()} Connected Successfully!</h1>
+        <p>You can now close this window and return to the app.</p>
+        <script>
+          if (window.opener) {
+            window.opener.postMessage({ success: true, tool: "${tool}" }, "*");
+          }
+          setTimeout(() => window.close(), 3000);
+        </script>
+      </body>
+      </html>
+    `);
+  } catch (err) {
+    console.error("Google OAuth callback error:", err);
+    res.status(500).send("<h1>Authentication failed. Please try again or contact support.</h1>");
   }
 });
 
@@ -489,7 +588,7 @@ app.post("/api/search", checkUsageAndPlan, async (req, res) => {
   }
 });
 
-// ── Automate Workflows Endpoint (NO checkUsageAndPlan middleware) ──────────
+// ── Automate Workflows Endpoint (NO usage check) ──────────────────────────
 app.post("/api/automate-workflows", async (req, res) => {
   const userId = req.headers["x-user-id"];
 
