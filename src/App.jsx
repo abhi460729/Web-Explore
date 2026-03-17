@@ -64,6 +64,12 @@ function App() {
   const [activeTab, setActiveTab] = useState("answer");
   const [theme, setTheme] = useState(localStorage.getItem("theme") || "light");
   const [values, setValues] = useState({});
+  const [integrations, setIntegrations] = useState({
+    gmail: false,
+    calendar: false,
+    docs: false,
+    sheets: false
+  });
 
   const user = JSON.parse(localStorage.getItem("user") || "{}");
 
@@ -243,9 +249,55 @@ function App() {
   ];
 
   useEffect(() => {
+
+    const handleMessage = (event) => {
+
+      if (event.data?.success) {
+        window.location.reload();
+      }
+
+    };
+
+    window.addEventListener("message", handleMessage);
+
+    return () => window.removeEventListener("message", handleMessage);
+
+  }, []);
+
+  useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+
+    const fetchIntegrations = async () => {
+
+      try {
+
+        const user = JSON.parse(localStorage.getItem("user") || "{}");
+
+        if (!user?.id) return;
+
+        const res = await fetch("/api/integrations", {
+          headers: {
+            "x-user-id": user.id
+          }
+        });
+
+        const data = await res.json();
+
+        setIntegrations(data);
+
+      } catch (err) {
+        console.error("Failed to fetch integrations", err);
+      }
+
+    };
+
+    fetchIntegrations();
+
+  }, []);
 
   useEffect(() => {
     const isDev = import.meta.env.DEV;
@@ -289,6 +341,41 @@ function App() {
     query.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 50);
 
   const debouncedSetPrompt = useCallback(debounce((value) => setPrompt(value), 300), []);
+
+  const connectGoogleTool = async (tool) => {
+
+    try {
+
+      const user = JSON.parse(localStorage.getItem("user") || "{}");
+
+      if (!user?.id) {
+        alert("Please login first");
+        return;
+      }
+
+      const res = await fetch(`/api/google/auth?tool=${tool}`, {
+        headers: {
+          "x-user-id": user.id
+        }
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert(data.error || "Failed to connect");
+        return;
+      }
+
+      if (data.authUrl) {
+        window.open(data.authUrl, "_blank", "width=500,height=600");
+      }
+
+    } catch (err) {
+      console.error(err);
+      alert("Connection failed");
+    }
+
+  };
 
   const handleMicClick = () => {
     if (!recognition) {
@@ -496,8 +583,42 @@ function App() {
       (f) => !f.required || (values[f.key]?.trim?.() || "").length > 0
     );
 
-    const handleGenerate = () => {
-      if (!isValid) return;
+    const handleGenerate = async () => {
+        if (!isValid) return;
+
+      if (workflow.slug === "email-followup") {
+
+      try {
+
+        const res = await fetch("/api/workflows/email-followup/start", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-user-id": user?.id || ""
+          },
+          body: JSON.stringify({
+            gmail_label: values.gmail_label || null
+          })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          alert(data.error || "Automation failed");
+          return;
+        }
+
+        alert("Email Follow-Up automation started successfully!");
+
+        navigate("/search");
+
+        } catch (err) {
+          alert("Failed to start automation");
+        }
+
+        return;
+      }
+
 
       let finalPrompt = workflow.promptTemplate;
       Object.entries(values).forEach(([k, v]) => {
@@ -583,19 +704,70 @@ function App() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
             {workflowCards.map((card, index) => (
-              <div
-                key={index}
-                onClick={() => navigate(`/workflow-input/${card.slug}`)}
-                className="bg-white dark:bg-gray-800 rounded-3xl p-6 sm:p-8 shadow-lg hover:shadow-2xl transition-all duration-300 cursor-pointer border border-gray-100 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500 group"
-              >
-                <h3 className="text-xl sm:text-2xl font-semibold mb-4 text-gray-900 dark:text-white group-hover:text-gray-700 dark:group-hover:text-gray-300">
-                  {card.title}
-                </h3>
-                <p className="text-sm text-gray-500 dark:text-gray-400 italic break-words">
-                  {card.promptTemplate}
-                </p>
-              </div>
-            ))}
+                <div
+                  key={index}
+                  onClick={() => navigate(`/workflow-input/${card.slug}`)}
+                  className="bg-white dark:bg-gray-800 rounded-3xl p-6 sm:p-8 shadow-lg hover:shadow-2xl transition-all duration-300 cursor-pointer border border-gray-100 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500 group"
+                >
+                  <h3 className="text-xl sm:text-2xl font-semibold mb-4 text-gray-900 dark:text-white group-hover:text-gray-700 dark:group-hover:text-gray-300">
+                    {card.title}
+                  </h3>
+
+                  <p className="text-sm text-gray-500 dark:text-gray-400 italic break-words mb-4">
+                    {card.promptTemplate}
+                  </p>
+
+                  {/* CONNECT BUTTONS */}
+
+                  {card.slug === "email-followup" && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        connectGoogleTool("gmail");
+                      }}
+                      className="mt-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg text-sm"
+                    >
+                      Connect Gmail
+                    </button>
+                  )}
+
+                  {card.slug === "project-reminders" && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        connectGoogleTool("calendar");
+                      }}
+                      className="mt-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm"
+                    >
+                      Connect Calendar
+                    </button>
+                  )}
+
+                  {card.slug === "research-competitors" && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        connectGoogleTool("docs");
+                      }}
+                      className="mt-2 px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded-lg text-sm"
+                    >
+                      Connect Docs
+                    </button>
+                  )}
+
+                  {card.slug === "pitch-emails" && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        connectGoogleTool("sheets");
+                      }}
+                      className="mt-2 px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg text-sm"
+                    >
+                      Connect Sheets
+                    </button>
+                  )}
+                </div>
+              ))}
           </div>
 
           <div className="mt-16 flex justify-center">

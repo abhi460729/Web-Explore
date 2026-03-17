@@ -612,6 +612,82 @@ app.post("/api/automate-workflows", async (req, res) => {
   }
 });
 
+app.post("/api/workflows/email-followup/start", async (req, res) => {
+
+  const userId = req.headers["x-user-id"];
+  const { gmail_label } = req.body;
+
+  if (!userId) {
+    return res.status(401).json({ error: "User not authenticated" });
+  }
+
+  try {
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!user.gmailTokens) {
+      return res.status(400).json({
+        error: "Please connect Gmail first"
+      });
+    }
+
+    console.log("Email Followup automation started for:", user.email);
+    console.log("Monitoring label:", gmail_label);
+
+    // future: Gmail watcher logic
+
+    res.json({
+      success: true,
+      message: "Email follow-up automation started"
+    });
+
+  } catch (err) {
+
+    console.error("Workflow error:", err);
+
+    res.status(500).json({
+      error: "Failed to start automation"
+    });
+
+  }
+
+});
+
+app.get("/api/integrations", async (req, res) => {
+
+  const userId = req.headers["x-user-id"];
+
+  if (!userId) {
+    return res.status(401).json({ error: "User not authenticated" });
+  }
+
+  try {
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    res.json({
+      gmail: !!user.gmailTokens,
+      calendar: !!user.calendarTokens,
+      docs: !!user.docsTokens,
+      sheets: !!user.sheetsTokens
+    });
+
+  } catch (err) {
+
+    console.error(err);
+
+    res.status(500).json({
+      error: "Failed to fetch integrations"
+    });
+
+  }
+
+});
+
 // ── History Endpoint ──────────────────────────────────────────────────────
 app.get("/api/history", checkUsageAndPlan, async (req, res) => {
   try {
