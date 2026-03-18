@@ -1,5 +1,5 @@
 // server.js - Updated with Google OAuth for tools (Gmail, Calendar, Docs, Sheets)
-
+import { google } from "googleapis";
 import { config } from "dotenv";
 config();
 
@@ -588,6 +588,121 @@ app.post("/api/search", checkUsageAndPlan, async (req, res) => {
   }
 });
 
+app.get("/api/calendar/today-meetings", async (req, res) => {
+  const userId = req.headers["x-user-id"];
+  if (!userId) {
+    return res.status(401).json({ error: "User not authenticated" });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { calendarTokens: true }
+    });
+
+    if (!user?.calendarTokens) {
+      return res.status(400).json({ error: "Please connect Google Calendar first" });
+    }
+
+    const oauth2Client = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    oauth2Client.setCredentials(user.calendarTokens);
+
+    const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+
+    // Debug current time
+    const now = new Date();
+    console.log("[DEBUG] Server current time (UTC):", now.toISOString());
+
+    // Optional: today's range in UTC (IST midnight to midnight)
+    // Uncomment if you want to filter to today only (after scopes fix)
+    /*
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+    const todayStartUTC = new Date(now.getTime() + IST_OFFSET_MS);
+    todayStartUTC.setUTCHours(0, 0, 0, 0);
+    const todayEndUTC = new Date(todayStartUTC);
+    todayEndUTC.setUTCHours(23, 59, 59, 999);
+
+    const timeMin = todayStartUTC.toISOString();
+    const timeMax = todayEndUTC.toISOString();
+
+    console.log("[DEBUG] timeMin:", timeMin);
+    console.log("[DEBUG] timeMax:", timeMax);
+    */
+
+    const params = {
+      calendarId: 'primary',
+      singleEvents: true,
+      orderBy: 'startTime',
+      maxResults: 50,
+      showDeleted: false,
+      timeZone: 'Asia/Kolkata',  // Helps include all-day events correctly
+      // timeMin, timeMax,   // ← uncomment when scopes are fixed
+    };
+
+    const response = await calendar.events.list(params);
+
+    const events = response.data.items || [];
+    console.log("[DEBUG] Events count:", events.length);
+
+    if (events.length > 0) {
+      console.log("[DEBUG] First event sample:", JSON.stringify(events[0], null, 2));
+    }
+
+    if (events.length === 0) {
+      return res.json({
+        message: "🎉 Aaj ke liye koi meeting nahi hai (ya calendar access issue ho sakta hai – scopes check karo).",
+        debug: {
+          count: 0,
+          // timeMin: timeMin || 'not set',
+          // timeMax: timeMax || 'not set',
+          note: "If 0 events but you see them in web → re-authorize with calendar.readonly scope"
+        }
+      });
+    }
+
+    // IST offset for display (since API returns UTC dateTime)
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+    const formatted = events.map(e => {
+      let time = "All Day";
+
+      if (e.start?.dateTime) {
+        const utcDate = new Date(e.start.dateTime);
+        const istDate = new Date(utcDate.getTime() + IST_OFFSET_MS);
+        time = istDate.toLocaleTimeString('en-IN', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true
+        });
+      } else if (e.start?.date) {
+        time = "All Day";
+      }
+
+      return `📅 ${e.summary || "(No title)"} at ${time} (ID: ${e.id})`;
+    }).join("\n");
+
+    res.json({
+      message: `Aaj ki meetings Google Calendar se:\n\n${formatted}`,
+      debug: { count: events.length }
+    });
+
+  } catch (err) {
+    console.error("[ERROR] Calendar API failed:", err.message);
+    if (err.response?.data) {
+      console.error("[ERROR] Google response:", JSON.stringify(err.response.data, null, 2));
+    }
+    res.status(500).json({
+      error: "Failed to fetch meetings",
+      details: err.message,
+      googleError: err.response?.data?.error?.message || "No details"
+    });
+  }
+});
+
 // ── Automate Workflows Endpoint (NO usage check) ──────────────────────────
 app.post("/api/automate-workflows", async (req, res) => {
   const userId = req.headers["x-user-id"];
@@ -612,47 +727,136 @@ app.post("/api/automate-workflows", async (req, res) => {
   }
 });
 
-app.post("/api/workflows/email-followup/start", async (req, res) => {
-
+app.get("/api/calendar/today-meetings", async (req, res) => {
   const userId = req.headers["x-user-id"];
-  const { gmail_label } = req.body;
-
   if (!userId) {
     return res.status(401).json({ error: "User not authenticated" });
   }
 
   try {
-
     const user = await prisma.user.findUnique({
-      where: { id: userId }
+      where: { id: userId },
+      select: { calendarTokens: true }
     });
 
-    if (!user.gmailTokens) {
-      return res.status(400).json({
-        error: "Please connect Gmail first"
+    if (!user?.calendarTokens) {
+      return res.status(400).json({ error: "Please connect Google Calendar first" });
+    }
+
+    const oauth2Client = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    oauth2Client.setCredentials(user.calendarTokens);
+
+    const calendar = google.calendar({ version: "v3", auth: oauth2Client });
+
+    const now = new Date();
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+    // Today start (IST midnight → UTC)
+    const todayStartUTC = new Date(now.getTime() + IST_OFFSET_MS);
+    todayStartUTC.setUTCHours(0, 0, 0, 0);
+
+    // Today end (IST 23:59:59 → UTC)
+    const todayEndUTC = new Date(todayStartUTC);
+    todayEndUTC.setUTCHours(23, 59, 59, 999);
+
+    const timeMin = todayStartUTC.toISOString();  // e.g. 2026-03-17T18:30:00.000Z
+    const timeMax = todayEndUTC.toISOString();    // e.g. 2026-03-18T18:29:59.999Z
+
+    console.log("[DEBUG] Current UTC:", now.toISOString());
+    console.log("[DEBUG] IST approx:", now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }));
+    console.log("[DEBUG] timeMin:", timeMin);
+    console.log("[DEBUG] timeMax:", timeMax);
+
+    const response = await calendar.events.list({
+      calendarId: "primary",
+      timeMin,
+      timeMax,
+      singleEvents: true,
+      orderBy: "startTime",
+      maxResults: 100,
+      showDeleted: false,
+      timeZone: "Asia/Kolkata"
+    });
+
+    const events = response.data.items || [];
+
+    console.log("[DEBUG] Today's events count:", events.length);
+
+    if (events.length > 0) {
+      console.log("[DEBUG] First few events:");
+      events.slice(0, 5).forEach(e => {
+        console.log(`- ${e.summary || "No title"} | Start: ${e.start?.dateTime || e.start?.date || "unknown"}`);
       });
     }
 
-    console.log("Email Followup automation started for:", user.email);
-    console.log("Monitoring label:", gmail_label);
+    if (events.length === 0) {
+      return res.json({
+        message: "🎉 Aaj ke liye koi event API se nahi mila.\n\nCheck karo:\n- Events March 18, 2026 ko primary calendar mein hain?\n- Event ka time zone 'Asia/Kolkata' set hai?\n- New test event banao abhi aur phir try karo.\nWeb pe dikhte hain toh calendarId 'primary' sahi hai ya nahi confirm karo.",
+        debug: { timeMin, timeMax, count: 0 }
+      });
+    }
 
-    // future: Gmail watcher logic
+    // IST time ke liye
+    const formatTime = (dateTime) => {
+      if (!dateTime) return "All Day";
+      const dt = new Date(dateTime);
+      return dt.toLocaleTimeString("en-IN", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+        timeZone: "Asia/Kolkata"
+      });
+    };
+
+    // Group by time slots
+    const morning = [], afternoon = [], evening = [], night = [], allDay = [];
+
+    events.forEach(e => {
+      const entry = `**${formatTime(e.start?.dateTime)}**: ${e.summary || "(No title)"} (ID: ${e.id.slice(0, 12)}...)`;
+
+      if (e.start?.date) {
+        allDay.push(`**All Day**: ${e.summary || "(No title)"} (ID: ${e.id.slice(0, 12)}...)`);
+        return;
+      }
+
+      const hour = new Date(e.start.dateTime).getUTCHours(); // UTC hour
+      const localHour = (hour + 5.5) % 24; // rough IST hour
+
+      if (localHour < 12) morning.push(entry);
+      else if (localHour < 17) afternoon.push(entry);
+      else if (localHour < 21) evening.push(entry);
+      else night.push(entry);
+    });
+
+    let summary = "Here's a summary of your meetings for today from Google Calendar:\n\n";
+
+    if (morning.length) summary += "### Morning\n" + morning.map(e => `- ${e}`).join("\n") + "\n\n";
+    if (afternoon.length) summary += "### Afternoon\n" + afternoon.map(e => `- ${e}`).join("\n") + "\n\n";
+    if (evening.length) summary += "### Evening\n" + evening.map(e => `- ${e}`).join("\n") + "\n\n";
+    if (night.length) summary += "### Late Evening/Night\n" + night.map(e => `- ${e}`).join("\n") + "\n\n";
+    if (allDay.length) summary += "### Additional Items\n" + allDay.join("\n") + "\n\n";
+
+    summary += "Notes:\n- Back-to-back schedules hain (flights + interviews) – time overlaps pe dhyan do.\n- Flight boarding time aur prep ready rakho.\n- Updates ke liye calendar check karte raho!\n\nBusy day ahead – all the best! 🚀";
 
     res.json({
-      success: true,
-      message: "Email follow-up automation started"
+      message: summary,
+      count: events.length,
+      debug: { timeMin, timeMax }
     });
 
   } catch (err) {
-
-    console.error("Workflow error:", err);
+    console.error("[ERROR] Calendar error:", err.message);
+    if (err.response?.data) console.error("Google details:", err.response.data);
 
     res.status(500).json({
-      error: "Failed to start automation"
+      error: "Failed to fetch today's schedule",
+      details: err.message
     });
-
   }
-
 });
 
 app.get("/api/integrations", async (req, res) => {

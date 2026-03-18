@@ -377,6 +377,45 @@ function App() {
 
   };
 
+  const fetchTodayMeetings = async () => {
+
+  try {
+
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+
+    if (!user?.id) {
+      alert("Please login first");
+      return;
+    }
+
+    const res = await fetch("/api/calendar/today-meetings", {
+      headers: {
+        "x-user-id": user.id
+      }
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      alert(data.error || "Failed to fetch meetings");
+      return;
+    }
+
+    // auto fill prompt in chat
+    setPrompt(data.message);
+
+    // automatically run AI search
+    handleSubmit(null, data.message, "ai");
+
+  } catch (err) {
+
+    console.error(err);
+    alert("Failed to fetch calendar meetings");
+
+  }
+
+};
+
   const handleMicClick = () => {
     if (!recognition) {
       alert("Speech recognition is not supported in this browser.");
@@ -411,6 +450,12 @@ function App() {
       return match;
     });
   };
+
+  function shouldShowHeading(text) {
+    if (!text) return false;
+    const wordCount = text.trim().split(/\s+/).length;
+    return wordCount <= 20;
+  }
 
   const showTab = (tab) => setActiveTab(tab);
 
@@ -733,9 +778,14 @@ function App() {
 
                   {card.slug === "project-reminders" && (
                     <button
-                      onClick={(e) => {
+                      onClick={async (e) => {
                         e.stopPropagation();
-                        connectGoogleTool("calendar");
+
+                        if (!integrations.calendar) {
+                          connectGoogleTool("calendar");
+                        } else {
+                          await fetchTodayMeetings();
+                        }
                       }}
                       className="mt-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm"
                     >
@@ -1136,7 +1186,7 @@ function App() {
 
           {response && mode === "search" && (
             <div className="mt-8 p-4 answer-container w-full">
-              {queryParam && (
+              {queryParam && shouldShowHeading(response.text) && (
                 <h1 className="text-4xl font-handwritten text-center mb-6">
                   {decodeURIComponent(queryParam)}
                 </h1>
@@ -1187,7 +1237,7 @@ function App() {
 
           {response && mode === "ai" && (
             <div className="mt-8 p-4 response-container w-full">
-              {queryParam && (
+              {queryParam && shouldShowHeading(response.summary) && (
                 <h1 className="text-4xl font-handwritten text-center mb-6">
                   {decodeURIComponent(queryParam)}
                 </h1>
