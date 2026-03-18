@@ -759,6 +759,7 @@ app.get("/api/calendar/today-meetings", async (req, res) => {
     const todayStartUTC = new Date(now.getTime() + IST_OFFSET_MS);
     todayStartUTC.setUTCHours(0, 0, 0, 0);
 
+    
     // Today end (IST 23:59:59 → UTC)
     const todayEndUTC = new Date(todayStartUTC);
     todayEndUTC.setUTCHours(23, 59, 59, 999);

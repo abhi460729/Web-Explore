@@ -1182,6 +1182,7 @@ function App() {
             </div>
           )}
 
+
           {error && <p className="text-red-500 mt-6 text-center">{error}</p>}
 
           {response && mode === "search" && (
