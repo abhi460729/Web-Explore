@@ -18,6 +18,7 @@ function App() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  
   const getDoodle = () => {
     const today = new Date();
     const monthDay = `${today.getMonth() + 1}-${today.getDate()}`;
