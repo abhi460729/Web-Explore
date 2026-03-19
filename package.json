@@ -28,6 +28,7 @@
     "dotenv": "^17.3.1",
     "express": "^4.22.1",
     "google-auth-library": "^10.2.0",
+    "googleapis": "^171.4.0",
     "lodash": "^4.17.21",
     "lucide-react": "^0.536.0",
     "marked": "^17.0.0",
