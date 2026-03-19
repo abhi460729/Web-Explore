@@ -378,6 +378,37 @@ function App() {
 
   };
 
+  const disconnectGoogleTool = async (tool) => {
+    try {
+      const user = JSON.parse(localStorage.getItem("user") || "{}");
+
+      if (!user?.id) {
+        alert("Please login first");
+        return;
+      }
+
+      const res = await fetch(`/api/google/disconnect?tool=${tool}`, {
+        method: "POST",
+        headers: {
+          "x-user-id": user.id
+        }
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert(data.error || "Failed to disconnect");
+        return;
+      }
+
+      setIntegrations((prev) => ({ ...prev, [tool]: false }));
+      alert(`${tool.charAt(0).toUpperCase() + tool.slice(1)} disconnected successfully.`);
+    } catch (err) {
+      console.error(err);
+      alert("Disconnect failed");
+    }
+  };
+
   const fetchTodayMeetings = async () => {
 
   try {
@@ -769,28 +800,35 @@ function App() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        connectGoogleTool("gmail");
+                        if (integrations.gmail) {
+                          if (window.confirm("Disconnect Gmail?")) {
+                            disconnectGoogleTool("gmail");
+                          }
+                        } else {
+                          connectGoogleTool("gmail");
+                        }
                       }}
-                      className="mt-2 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg text-sm"
+                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.gmail ? "bg-green-600 hover:bg-green-700" : "bg-red-500 hover:bg-red-600"}`}
                     >
-                      Connect Gmail
+                      {integrations.gmail ? "Connected ✓ (click to disconnect)" : "Connect Gmail"}
                     </button>
                   )}
 
                   {card.slug === "project-reminders" && (
                     <button
-                      onClick={async (e) => {
+                      onClick={(e) => {
                         e.stopPropagation();
-
-                        if (!integrations.calendar) {
-                          connectGoogleTool("calendar");
+                        if (integrations.calendar) {
+                          if (window.confirm("Disconnect Calendar?")) {
+                            disconnectGoogleTool("calendar");
+                          }
                         } else {
-                          await fetchTodayMeetings();
+                          connectGoogleTool("calendar");
                         }
                       }}
-                      className="mt-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm"
+                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.calendar ? "bg-green-600 hover:bg-green-700" : "bg-blue-500 hover:bg-blue-600"}`}
                     >
-                      Connect Calendar
+                      {integrations.calendar ? "Connected ✓ (click to disconnect)" : "Connect Calendar"}
                     </button>
                   )}
 
@@ -798,11 +836,17 @@ function App() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        connectGoogleTool("docs");
+                        if (integrations.docs) {
+                          if (window.confirm("Disconnect Docs?")) {
+                            disconnectGoogleTool("docs");
+                          }
+                        } else {
+                          connectGoogleTool("docs");
+                        }
                       }}
-                      className="mt-2 px-4 py-2 bg-purple-500 hover:bg-purple-600 text-white rounded-lg text-sm"
+                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.docs ? "bg-green-600 hover:bg-green-700" : "bg-purple-500 hover:bg-purple-600"}`}
                     >
-                      Connect Docs
+                      {integrations.docs ? "Connected ✓ (click to disconnect)" : "Connect Docs"}
                     </button>
                   )}
 
@@ -810,11 +854,17 @@ function App() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        connectGoogleTool("sheets");
+                        if (integrations.sheets) {
+                          if (window.confirm("Disconnect Sheets?")) {
+                            disconnectGoogleTool("sheets");
+                          }
+                        } else {
+                          connectGoogleTool("sheets");
+                        }
                       }}
-                      className="mt-2 px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg text-sm"
+                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.sheets ? "bg-green-600 hover:bg-green-700" : "bg-green-500 hover:bg-green-600"}`}
                     >
-                      Connect Sheets
+                      {integrations.sheets ? "Connected ✓ (click to disconnect)" : "Connect Sheets"}
                     </button>
                   )}
                 </div>

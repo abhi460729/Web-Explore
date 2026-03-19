@@ -376,6 +376,31 @@ app.get("/api/google/auth", async (req, res) => {
   }
 });
 
+// ── Google Tool Disconnect (Clear stored tokens) ──────────────────────────
+app.post("/api/google/disconnect", async (req, res) => {
+  const userId = req.headers["x-user-id"];
+  const tool = req.query.tool?.toLowerCase();
+
+  if (!userId) return res.status(401).json({ error: "Unauthorized - user ID missing" });
+  if (!tool || !TOOL_SCOPES[tool]) {
+    return res.status(400).json({ error: "Invalid or missing tool parameter" });
+  }
+
+  const tokenField = `${tool}Tokens`;
+
+  try {
+    await prisma.user.update({
+      where: { id: userId },
+      data: { [tokenField]: null }
+    });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Failed to disconnect tool:", err);
+    res.status(500).json({ error: "Failed to disconnect tool" });
+  }
+});
+
 // ── Google OAuth Callback ─────────────────────────────────────────────────
 app.get("/api/google/callback", async (req, res) => {
   const { code, state, error } = req.query;
