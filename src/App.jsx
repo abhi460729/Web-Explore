@@ -1573,6 +1573,8 @@ function App() {
           "5,000 AI Credits / month",
           "1 Credit = 1,000 tokens",
           "Ultra fast",
+          "Integration Powered Automation",
+          "Enterprise features",
           "Dedicated support",
         ],
         buttonText: "Upgrade to ULTRA",
