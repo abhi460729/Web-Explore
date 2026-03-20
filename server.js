@@ -643,6 +643,11 @@ app.post("/api/search", checkUsageAndPlan, async (req, res) => {
 
 app.get("/api/calendar/today-meetings", async (req, res) => {
   const userId = req.headers["x-user-id"];
+  const focus = String(req.query.focus || "").trim().toLowerCase();
+  const rawPastHours = Number(req.query.pastHours);
+  const rawAheadHours = Number(req.query.aheadHours);
+  const pastHours = Number.isFinite(rawPastHours) ? Math.min(Math.max(rawPastHours, 0), 12) : 2;
+  const aheadHours = Number.isFinite(rawAheadHours) ? Math.min(Math.max(rawAheadHours, 1), 168) : 24;
   if (!userId) {
     return res.status(401).json({ error: "User not authenticated" });
   }
@@ -666,25 +671,26 @@ app.get("/api/calendar/today-meetings", async (req, res) => {
 
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
 
-    // Debug current time
     const now = new Date();
-    console.log("[DEBUG] Server current time (UTC):", now.toISOString());
-
-    // Optional: today's range in UTC (IST midnight to midnight)
-    // Uncomment if you want to filter to today only (after scopes fix)
-    /*
     const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-    const todayStartUTC = new Date(now.getTime() + IST_OFFSET_MS);
-    todayStartUTC.setUTCHours(0, 0, 0, 0);
-    const todayEndUTC = new Date(todayStartUTC);
-    todayEndUTC.setUTCHours(23, 59, 59, 999);
 
-    const timeMin = todayStartUTC.toISOString();
-    const timeMax = todayEndUTC.toISOString();
+    const nowInIST = new Date(now.getTime() + IST_OFFSET_MS);
+    const startOfTodayIST = new Date(nowInIST);
+    startOfTodayIST.setUTCHours(0, 0, 0, 0);
 
+    // Recent + ahead window (configurable):
+    // start = max(start of today IST, now - pastHours)
+    // end = now + aheadHours
+    const recentStart = new Date(now.getTime() - pastHours * 60 * 60 * 1000);
+    const timeMinDate = recentStart > startOfTodayIST ? recentStart : startOfTodayIST;
+    const timeMaxDate = new Date(now.getTime() + aheadHours * 60 * 60 * 1000);
+
+    const timeMin = timeMinDate.toISOString();
+    const timeMax = timeMaxDate.toISOString();
+
+    console.log("[DEBUG] Server current time (UTC):", now.toISOString());
     console.log("[DEBUG] timeMin:", timeMin);
     console.log("[DEBUG] timeMax:", timeMax);
-    */
 
     const params = {
       calendarId: 'primary',
@@ -693,7 +699,8 @@ app.get("/api/calendar/today-meetings", async (req, res) => {
       maxResults: 50,
       showDeleted: false,
       timeZone: 'Asia/Kolkata',  // Helps include all-day events correctly
-      // timeMin, timeMax,   // ← uncomment when scopes are fixed
+      timeMin,
+      timeMax,
     };
 
     const response = await calendar.events.list(params);
@@ -707,25 +714,27 @@ app.get("/api/calendar/today-meetings", async (req, res) => {
 
     if (events.length === 0) {
       return res.json({
-        message: "🎉 Aaj ke liye koi meeting nahi hai (ya calendar access issue ho sakta hai – scopes check karo).",
+        message: `No events found in the configured window (last ${pastHours} hours + next ${aheadHours} hours).`,
         debug: {
           count: 0,
-          // timeMin: timeMin || 'not set',
-          // timeMax: timeMax || 'not set',
+          timeMin,
+          timeMax,
+          pastHours,
+          aheadHours,
           note: "If 0 events but you see them in web → re-authorize with calendar.readonly scope"
         }
       });
     }
 
     // IST offset for display (since API returns UTC dateTime)
-    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+    const IST_DISPLAY_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
-    const formatted = events.map(e => {
+    const buildEventLine = (e) => {
       let time = "All Day";
 
       if (e.start?.dateTime) {
         const utcDate = new Date(e.start.dateTime);
-        const istDate = new Date(utcDate.getTime() + IST_OFFSET_MS);
+        const istDate = new Date(utcDate.getTime() + IST_DISPLAY_OFFSET_MS);
         time = istDate.toLocaleTimeString('en-IN', {
           hour: '2-digit',
           minute: '2-digit',
@@ -735,12 +744,59 @@ app.get("/api/calendar/today-meetings", async (req, res) => {
         time = "All Day";
       }
 
-      return `📅 ${e.summary || "(No title)"} at ${time} (ID: ${e.id})`;
-    }).join("\n");
+      const meetingLink = e.hangoutLink || e.htmlLink || "";
+      const location = e.location || "";
+      const attendees = (e.attendees || [])
+        .map((a) => a.email || a.displayName)
+        .filter(Boolean)
+        .slice(0, 5)
+        .join(", ");
+      const description = (e.description || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 180);
+
+      const extra = [
+        location ? `Location: ${location}` : "",
+        attendees ? `Attendees: ${attendees}` : "",
+        meetingLink ? `Link: ${meetingLink}` : "",
+        description ? `Notes: ${description}` : ""
+      ].filter(Boolean).join(" | ");
+
+      return `📅 ${e.summary || "(No title)"} at ${time} (ID: ${e.id})${extra ? ` | ${extra}` : ""}`;
+    };
+
+    const matchesFocus = (e) => {
+      if (!focus) return true;
+
+      const haystack = [
+        e.summary || "",
+        e.description || "",
+        e.location || "",
+        e.hangoutLink || "",
+        e.htmlLink || "",
+        ...(e.attendees || []).map((a) => `${a.email || ""} ${a.displayName || ""}`)
+      ].join(" ").toLowerCase();
+
+      return haystack.includes(focus);
+    };
+
+    const matchedEvents = focus ? events.filter(matchesFocus) : events;
+    const formatted = matchedEvents.map(buildEventLine).join("\n");
+
+    if (focus && matchedEvents.length === 0) {
+      const fallback = events.slice(0, 2).map(buildEventLine).join("\n");
+      return res.json({
+        message: `Focus topic: ${focus}\n\nNo direct calendar match found for this focus in today's events.\n\nClosest items from today:\n${fallback || "No events available."}`,
+        debug: { count: events.length, matchedCount: 0, focus }
+      });
+    }
 
     res.json({
-      message: `Aaj ki meetings Google Calendar se:\n\n${formatted}`,
-      debug: { count: events.length }
+      message: focus
+        ? `Focused calendar events for "${focus}":\n\n${formatted}`
+        : `Aaj ki meetings Google Calendar se:\n\n${formatted}`,
+      debug: { count: events.length, matchedCount: matchedEvents.length, focus, pastHours, aheadHours, timeMin, timeMax }
     });
 
   } catch (err) {
@@ -784,6 +840,10 @@ app.post("/api/workflows/gmail-catchup/start", async (req, res) => {
   const userId = req.headers["x-user-id"];
   const catchupTopic = String(req.body?.catchup_topic || "").trim();
   const gmailLabel = String(req.body?.gmail_label || "").trim();
+  const rawLookbackDays = Number(req.body?.lookback_days);
+  const lookbackDays = Number.isFinite(rawLookbackDays)
+    ? Math.min(Math.max(rawLookbackDays, 1), 365)
+    : 30;
 
   if (!userId) {
     return res.status(401).json({ error: "User not authenticated" });
@@ -817,10 +877,12 @@ app.post("/api/workflows/gmail-catchup/start", async (req, res) => {
     const gmail = google.gmail({ version: "v1", auth: oauth2Client });
 
     // Try strict-to-relaxed Gmail queries so user-entered label/topic combinations still work.
+    const relaxedDays = Math.min(lookbackDays * 3, 365);
+    const broadDays = Math.min(lookbackDays * 6, 365);
     const searchAttempts = [
-      `in:anywhere newer_than:30d label:"${gmailLabel}" "${catchupTopic}"`,
-      `in:anywhere newer_than:90d "${catchupTopic}" "${gmailLabel}"`,
-      `in:anywhere newer_than:180d "${catchupTopic}"`
+      `in:anywhere newer_than:${lookbackDays}d label:"${gmailLabel}" "${catchupTopic}"`,
+      `in:anywhere newer_than:${relaxedDays}d "${catchupTopic}" "${gmailLabel}"`,
+      `in:anywhere newer_than:${broadDays}d "${catchupTopic}"`
     ];
 
     let messageRefs = [];
@@ -844,7 +906,7 @@ app.post("/api/workflows/gmail-catchup/start", async (req, res) => {
     if (messageRefs.length === 0) {
       return res.json({
         success: true,
-        summary: `No matching emails found for topic \"${catchupTopic}\". I checked label \"${gmailLabel}\" first, then broader Gmail search.`
+        summary: `No matching emails found for topic \"${catchupTopic}\" in the last ${lookbackDays} days. I checked label \"${gmailLabel}\" first, then broader Gmail search.`
       });
     }
 
@@ -902,12 +964,12 @@ app.post("/api/workflows/gmail-catchup/start", async (req, res) => {
       Topic to track: ${catchupTopic}
       Gmail label: ${gmailLabel}
 
-Emails:\n${digestLines}
+      Emails:\n${digestLines}
 
-Output format:
-1) Top Updates (5 bullets max)
-2) Action Items (3 bullets max)
-3) Follow-up Priority (High/Medium/Low list)`
+      Output format:
+      1) Top Updates (5 bullets max)
+      2) Action Items (3 bullets max)
+      3) Follow-up Priority (High/Medium/Low list)`
       });
       summary = aiResponse.text;
     } catch (aiErr) {
@@ -921,6 +983,7 @@ Output format:
     res.json({
       success: true,
       usedQuery,
+      lookbackDays,
       fetchedCount: detailedMessages.length,
       matchedCount: filtered.length,
       summary,
@@ -933,6 +996,128 @@ Output format:
     }
     res.status(500).json({
       error: "Failed to fetch Gmail catch-up",
+      details: err.message
+    });
+  }
+});
+
+app.post("/api/workflows/research-competitors/start", async (req, res) => {
+  const userId = req.headers["x-user-id"];
+  const competitorNames = String(req.body?.competitor_names || "").trim();
+
+  if (!userId) {
+    return res.status(401).json({ error: "User not authenticated" });
+  }
+
+  if (!competitorNames) {
+    return res.status(400).json({ error: "competitor_names is required" });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { docsTokens: true, currentPlan: true }
+    });
+
+    if (!user?.docsTokens) {
+      return res.status(400).json({ error: "Please connect Google Docs first" });
+    }
+
+    const searchQuery = `Research competitors ${competitorNames}. Include strengths, weaknesses, pricing, recent news, and future plans with reliable sources.`;
+
+    const tavilyRes = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: process.env.TAVILY_API_KEY,
+        query: searchQuery,
+        search_depth: "advanced",
+        max_results: 8,
+      }),
+    });
+
+    if (!tavilyRes.ok) throw new Error(`Tavily failed: ${tavilyRes.status}`);
+
+    const { results = [] } = await tavilyRes.json();
+
+    const sources = results.map((r, i) => `[${i + 1}] ${r.title} (${r.url})`).join("\n");
+    const context = results.map((r, i) => `[${i + 1}] ${r.content}`).join("\n\n");
+
+    const modelForReport = "gpt-4o-mini";
+    const reportPrompt = `Create a concise competitor analysis report using the sources below.
+Competitors: ${competitorNames}
+
+Required sections:
+1) Strengths
+2) Weaknesses
+3) Pricing
+4) Recent News
+5) Possible Future Plans
+
+Rules:
+- Use bullet points.
+- Mention uncertainty when data is missing.
+- Add inline citations like [1], [2].
+
+Research Context:
+${context}
+
+Citations:
+${sources}
+
+Output:`;
+
+    const aiRes = await generateText({
+      model: openai(modelForReport),
+      prompt: reportPrompt,
+    });
+
+    const reportText = aiRes.text || "No report generated.";
+    const fullDocText = `Competitor Analysis: ${competitorNames}\n\n${reportText}\n\nSources:\n${sources || "No sources available."}`;
+
+    const oauth2Client = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    oauth2Client.setCredentials(user.docsTokens);
+
+    const docs = google.docs({ version: "v1", auth: oauth2Client });
+
+    const created = await docs.documents.create({
+      requestBody: {
+        title: `Competitor Analysis - ${competitorNames}`
+      }
+    });
+
+    const documentId = created.data.documentId;
+
+    await docs.documents.batchUpdate({
+      documentId,
+      requestBody: {
+        requests: [
+          {
+            insertText: {
+              location: { index: 1 },
+              text: fullDocText
+            }
+          }
+        ]
+      }
+    });
+
+    const docUrl = `https://docs.google.com/document/d/${documentId}/edit`;
+
+    res.json({
+      success: true,
+      docUrl,
+      summary: reportText,
+      sourcesCount: results.length
+    });
+  } catch (err) {
+    console.error("[Research Competitors Error]:", err.message);
+    res.status(500).json({
+      error: "Failed to generate competitor report in Google Docs",
       details: err.message
     });
   }

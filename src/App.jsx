@@ -215,20 +215,23 @@ function App() {
       ]
     },
     {
-      title: "Catch me up on Enterprise or Individual",
+      title: "Catch me up on Enterprise or Individual communications",
       slug: "gmail-catchup",
       promptTemplate: "Connect Gmail, fetch recent emails in real time, and summarize key updates based on my topic and label.",
       fields: [
         { key: "catchup_topic", label: "What do you want to track?", placeholder: "e.g. Passport", required: true },
-        { key: "gmail_label", label: "Gmail Label", placeholder: "e.g. Book Appointment", required: true }
+        { key: "gmail_label", label: "Gmail Label", placeholder: "e.g. Book Appointment", required: true },
+        { key: "lookback_days", label: "Lookback Window in Days (optional)", placeholder: "e.g. 30", required: false }
       ]
     },
     {
-      title: "Project Reminders",
+      title: "Catch me up on Enterprise or Individual meetings and tasks",
       slug: "project-reminders",
-      promptTemplate: "From the latest email about {{task subject}}, create project tasks, deadlines and reminders in Google Calendar for the team",
+      promptTemplate: "Connect Google Calendar, fetch meetings and tasks in real time, and summarize key updates.",
       fields: [
-        { key: "task subject", label: "Task / Project Subject", placeholder: "e.g. Website Redesign, Client Onboarding", required: true }
+        { key: "task subject", label: "Focus topic (optional)", placeholder: "e.g. Website Redesign, Client Onboarding", required: false },
+        { key: "past_hours", label: "Recent Past Window in Hours (optional)", placeholder: "e.g. 2", required: false },
+        { key: "ahead_hours", label: "Upcoming Window in Hours (optional)", placeholder: "e.g. 24", required: false }
       ]
     },
     {
@@ -681,7 +684,8 @@ function App() {
           },
           body: JSON.stringify({
             gmail_label: values.gmail_label || null,
-            catchup_topic: values.catchup_topic || ""
+            catchup_topic: values.catchup_topic || "",
+            lookback_days: values.lookback_days || ""
           })
         });
 
@@ -703,6 +707,99 @@ function App() {
 
         } catch (err) {
           alert("Failed to start automation");
+        }
+
+        return;
+      }
+
+      if (workflow.slug === "research-competitors") {
+
+        try {
+
+          const competitorNames = (values["competitor names"] || "").trim();
+
+          const res = await fetch("/api/workflows/research-competitors/start", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-user-id": user?.id || ""
+            },
+            body: JSON.stringify({
+              competitor_names: competitorNames
+            })
+          });
+
+          const data = await res.json();
+
+          if (!res.ok) {
+            alert(data.error || "Failed to generate competitor report");
+            return;
+          }
+
+          if (data.docUrl) {
+            window.open(data.docUrl, "_blank");
+          }
+
+          alert("Competitor report generated in Google Docs successfully!");
+
+          navigate("/search", {
+            state: {
+              prefillPrompt: data.summary || "Summarize competitor analysis",
+              autoRunMode: "ai"
+            }
+          });
+
+        } catch (err) {
+          alert("Failed to start competitor docs automation");
+        }
+
+        return;
+      }
+
+      if (workflow.slug === "project-reminders") {
+
+        try {
+
+          const focusTopic = (values["task subject"] || "").trim();
+          const pastHours = (values["past_hours"] || "").trim();
+          const aheadHours = (values["ahead_hours"] || "").trim();
+
+          const params = new URLSearchParams();
+          if (focusTopic) params.set("focus", focusTopic);
+          if (pastHours) params.set("pastHours", pastHours);
+          if (aheadHours) params.set("aheadHours", aheadHours);
+
+          const query = params.toString() ? `?${params.toString()}` : "";
+
+          const res = await fetch(`/api/calendar/today-meetings${query}`, {
+            headers: {
+              "x-user-id": user?.id || ""
+            }
+          });
+
+          const data = await res.json();
+
+          if (!res.ok) {
+            alert(data.error || "Failed to fetch meetings and tasks");
+            return;
+          }
+
+          const summaryPrompt = data.message || "Summarize my latest calendar meetings and tasks";
+          const finalPrompt = focusTopic
+            ? `${summaryPrompt}\n\nFocus topic: ${focusTopic}\nInstructions:\n1) Prioritize only focus-related items first.\n2) If no exact matches found, clearly say no direct match and then provide at most 2 closest items.\n3) Keep output concise with: Top Updates, Action Items, and Priority.`
+            : summaryPrompt;
+
+          alert("Calendar catch-up generated successfully!");
+
+          navigate("/search", {
+            state: {
+              prefillPrompt: finalPrompt,
+              autoRunMode: "ai"
+            }
+          });
+
+        } catch (err) {
+          alert("Failed to start calendar automation");
         }
 
         return;
@@ -820,7 +917,7 @@ function App() {
                           connectGoogleTool("gmail");
                         }
                       }}
-                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.gmail ? "bg-green-600 hover:bg-green-700" : "bg-gray-500 hover:bg-gray-600"}`}
+                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.gmail ? "bg-gray-600 hover:bg-gray-700" : "bg-gray-500 hover:bg-gray-600"}`}
                     >
                       {integrations.gmail ? "Connected ✓ (click to disconnect)" : "Connect Gmail"}
                     </button>
@@ -838,7 +935,7 @@ function App() {
                           connectGoogleTool("calendar");
                         }
                       }}
-                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.calendar ? "bg-green-600 hover:bg-green-700" : "bg-gray-500 hover:bg-gray-600"}`}
+                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.calendar ? "bg-gray-600 hover:bg-gray-700" : "bg-gray-500 hover:bg-gray-600"}`}
                     >
                       {integrations.calendar ? "Connected ✓ (click to disconnect)" : "Connect Calendar"}
                     </button>
@@ -856,7 +953,7 @@ function App() {
                           connectGoogleTool("docs");
                         }
                       }}
-                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.docs ? "bg-green-600 hover:bg-green-700" : "bg-gray-500 hover:bg-gray-600"}`}
+                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.docs ? "bg-gray-600 hover:bg-gray-700" : "bg-gray-500 hover:bg-gray-600"}`}
                     >
                       {integrations.docs ? "Connected ✓ (click to disconnect)" : "Connect Docs"}
                     </button>
@@ -874,7 +971,7 @@ function App() {
                           connectGoogleTool("sheets");
                         }
                       }}
-                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.sheets ? "bg-green-600 hover:bg-green-700" : "bg-gray-500 hover:bg-gray-600"}`}
+                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.sheets ? "bg-gray-600 hover:bg-gray-700" : "bg-gray-500 hover:bg-gray-600"}`}
                     >
                       {integrations.sheets ? "Connected ✓ (click to disconnect)" : "Connect Sheets"}
                     </button>
