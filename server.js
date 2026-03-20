@@ -2318,14 +2318,20 @@ app.get("/api/integrations", async (req, res) => {
   try {
 
     const user = await prisma.user.findUnique({
-      where: { id: userId }
+      where: { id: userId },
+      include: { currentPlan: true }
     });
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
 
     res.json({
       gmail: !!user.gmailTokens,
       calendar: !!user.calendarTokens,
       docs: !!user.docsTokens,
-      sheets: !!user.sheetsTokens
+      sheets: !!user.sheetsTokens,
+      currentPlanName: user.currentPlan?.name || "FREE"
     });
 
   } catch (err) {

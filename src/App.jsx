@@ -82,6 +82,13 @@ function App() {
   };
 
   const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const [currentPlanName, setCurrentPlanName] = useState(user?.currentPlan?.name || "FREE");
+  const isUltraUser = currentPlanName === "ULTRA";
+
+  const handleUpgradePlanClick = (e) => {
+    e.stopPropagation();
+    navigate("/pricing");
+  };
 
   const models = [
     "gpt-4o-mini",
@@ -325,7 +332,22 @@ function App() {
 
         const data = await res.json();
 
-        setIntegrations(data);
+        setIntegrations({
+          gmail: !!data.gmail,
+          calendar: !!data.calendar,
+          docs: !!data.docs,
+          sheets: !!data.sheets
+        });
+
+        if (data.currentPlanName) {
+          setCurrentPlanName(data.currentPlanName);
+
+          const updatedUser = {
+            ...user,
+            currentPlan: { ...(user.currentPlan || {}), name: data.currentPlanName }
+          };
+          localStorage.setItem("user", JSON.stringify(updatedUser));
+        }
 
       } catch (err) {
         console.error("Failed to fetch integrations", err);
@@ -335,7 +357,7 @@ function App() {
 
     fetchIntegrations();
 
-  }, []);
+  }, [location.pathname]);
 
   useEffect(() => {
     const isDev = import.meta.env.DEV;
@@ -1264,15 +1286,25 @@ function App() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (integrations.gmail) {
-                          disconnectGoogleTool("gmail");
+                        if (!isUltraUser) {
+                          navigate("/pricing");
                         } else {
-                          connectGoogleTool("gmail");
+                          if (integrations.gmail) {
+                            disconnectGoogleTool("gmail");
+                          } else {
+                            connectGoogleTool("gmail");
+                          }
                         }
                       }}
-                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.gmail ? "bg-gray-600 hover:bg-gray-700" : "bg-gray-500 hover:bg-gray-600"}`}
+                      className={`mt-2 px-4 py-2 rounded-lg text-sm cursor-pointer transition ${
+                        !isUltraUser
+                          ? "bg-gray-500 hover:bg-gray-600 text-white block mx-auto"
+                          : integrations.gmail
+                          ? "bg-gray-600 hover:bg-gray-700"
+                          : "bg-gray-500 hover:bg-gray-600"
+                      }`}
                     >
-                      {integrations.gmail ? "Connected ✓ (click to disconnect)" : "Connect Gmail"}
+                      {!isUltraUser ? "Upgrade Plan" : integrations.gmail ? "Connected ✓ (click to disconnect)" : "Connect Gmail"}
                     </button>
                   )}
 
@@ -1280,15 +1312,25 @@ function App() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (integrations.calendar) {
-                          disconnectGoogleTool("calendar");
+                        if (!isUltraUser) {
+                          navigate("/pricing");
                         } else {
-                          connectGoogleTool("calendar");
+                          if (integrations.calendar) {
+                            disconnectGoogleTool("calendar");
+                          } else {
+                            connectGoogleTool("calendar");
+                          }
                         }
                       }}
-                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.calendar ? "bg-gray-600 hover:bg-gray-700" : "bg-gray-500 hover:bg-gray-600"}`}
+                      className={`mt-2 px-4 py-2 rounded-lg text-sm cursor-pointer transition ${
+                        !isUltraUser
+                          ? "bg-gray-500 hover:bg-gray-600 text-white block mx-auto"
+                          : integrations.calendar
+                          ? "bg-gray-600 hover:bg-gray-700"
+                          : "bg-gray-500 hover:bg-gray-600"
+                      }`}
                     >
-                      {integrations.calendar ? "Connected ✓ (click to disconnect)" : "Connect Calendar"}
+                      {!isUltraUser ? "Upgrade Plan" : integrations.calendar ? "Connected ✓ (click to disconnect)" : "Connect Calendar"}
                     </button>
                   )}
 
@@ -1296,126 +1338,191 @@ function App() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (integrations.docs) {
-                          disconnectGoogleTool("docs");
+                        if (!isUltraUser) {
+                          navigate("/pricing");
                         } else {
-                          connectGoogleTool("docs");
+                          if (integrations.docs) {
+                            disconnectGoogleTool("docs");
+                          } else {
+                            connectGoogleTool("docs");
+                          }
                         }
                       }}
-                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.docs ? "bg-gray-600 hover:bg-gray-700" : "bg-gray-500 hover:bg-gray-600"}`}
+                      className={`mt-2 px-4 py-2 rounded-lg text-sm cursor-pointer transition ${
+                        !isUltraUser
+                          ? "bg-gray-500 hover:bg-gray-600 text-white block mx-auto"
+                          : integrations.docs
+                          ? "bg-gray-600 hover:bg-gray-700"
+                          : "bg-gray-500 hover:bg-gray-600"
+                      }`}
                     >
-                      {integrations.docs ? "Connected ✓ (click to disconnect)" : "Connect Docs"}
+                      {!isUltraUser ? "Upgrade Plan" : integrations.docs ? "Connected ✓ (click to disconnect)" : "Connect Docs"}
                     </button>
                   )}
 
                   {card.slug === "pitch-emails" && (
-                    <>
+                    !isUltraUser ? (
                       <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (integrations.sheets) {
-                            disconnectGoogleTool("sheets");
-                          } else {
-                            connectGoogleTool("sheets");
-                          }
-                        }}
-                        className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.sheets ? "bg-gray-600 hover:bg-gray-700" : "bg-gray-500 hover:bg-gray-600"}`}
+                        onClick={handleUpgradePlanClick}
+                        className="mt-2 px-4 py-2 rounded-lg text-sm bg-gray-500 hover:bg-gray-600 text-white cursor-pointer transition block mx-auto"
                       >
-                        {integrations.sheets ? "Sheets Connected ✓ (click to disconnect)" : "Connect Sheets"}
+                        Upgrade Plan
                       </button>
+                    ) : (
+                      <>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (integrations.sheets) {
+                              disconnectGoogleTool("sheets");
+                            } else {
+                              connectGoogleTool("sheets");
+                            }
+                          }}
+                          className={`mt-2 px-4 py-2 rounded-lg text-sm cursor-pointer transition ${
+                            integrations.sheets
+                              ? "bg-gray-600 hover:bg-gray-700"
+                              : "bg-gray-500 hover:bg-gray-600"
+                          }`}
+                        >
+                          {integrations.sheets ? "Sheets Connected ✓ (click to disconnect)" : "Connect Sheets"}
+                        </button>
 
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (integrations.docs) {
-                            disconnectGoogleTool("docs");
-                          } else {
-                            connectGoogleTool("docs");
-                          }
-                        }}
-                        className={`mt-2 ml-2 px-4 py-2 rounded-lg text-sm ${integrations.docs ? "bg-gray-600 hover:bg-gray-700" : "bg-gray-500 hover:bg-gray-600"}`}
-                      >
-                        {integrations.docs ? "Docs Connected ✓ (click to disconnect)" : "Connect Docs"}
-                      </button>
-                    </>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (integrations.docs) {
+                              disconnectGoogleTool("docs");
+                            } else {
+                              connectGoogleTool("docs");
+                            }
+                          }}
+                          className={`mt-2 ml-2 px-4 py-2 rounded-lg text-sm cursor-pointer transition ${
+                            integrations.docs
+                              ? "bg-gray-600 hover:bg-gray-700"
+                              : "bg-gray-500 hover:bg-gray-600"
+                          }`}
+                        >
+                          {integrations.docs ? "Docs Connected ✓ (click to disconnect)" : "Connect Docs"}
+                        </button>
+                      </>
+                    )
                   )}
 
                   {card.slug === "send-doc-emails" && (
-                    <>
+                    !isUltraUser ? (
                       <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (integrations.gmail) {
-                            disconnectGoogleTool("gmail");
-                          } else {
-                            connectGoogleTool("gmail");
-                          }
-                        }}
-                        className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.gmail ? "bg-gray-600 hover:bg-gray-700" : "bg-gray-500 hover:bg-gray-600"}`}
+                        onClick={handleUpgradePlanClick}
+                        className="mt-2 px-4 py-2 rounded-lg text-sm bg-gray-500 hover:bg-gray-600 text-white cursor-pointer transition block mx-auto"
                       >
-                        {integrations.gmail ? "Gmail Connected ✓ (click to disconnect)" : "Connect Gmail"}
+                        Upgrade Plan
                       </button>
+                    ) : (
+                      <>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (integrations.gmail) {
+                              disconnectGoogleTool("gmail");
+                            } else {
+                              connectGoogleTool("gmail");
+                            }
+                          }}
+                          className={`mt-2 px-4 py-2 rounded-lg text-sm cursor-pointer transition ${
+                            integrations.gmail
+                              ? "bg-gray-600 hover:bg-gray-700"
+                              : "bg-gray-500 hover:bg-gray-600"
+                          }`}
+                        >
+                          {integrations.gmail ? "Gmail Connected ✓ (click to disconnect)" : "Connect Gmail"}
+                        </button>
 
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (integrations.docs) {
-                            disconnectGoogleTool("docs");
-                          } else {
-                            connectGoogleTool("docs");
-                          }
-                        }}
-                        className={`mt-2 ml-2 px-4 py-2 rounded-lg text-sm ${integrations.docs ? "bg-gray-600 hover:bg-gray-700" : "bg-gray-500 hover:bg-gray-600"}`}
-                      >
-                        {integrations.docs ? "Docs Connected ✓ (click to disconnect)" : "Connect Docs"}
-                      </button>
-                    </>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (integrations.docs) {
+                              disconnectGoogleTool("docs");
+                            } else {
+                              connectGoogleTool("docs");
+                            }
+                          }}
+                          className={`mt-2 ml-2 px-4 py-2 rounded-lg text-sm cursor-pointer transition ${
+                            integrations.docs
+                              ? "bg-gray-600 hover:bg-gray-700"
+                              : "bg-gray-500 hover:bg-gray-600"
+                          }`}
+                        >
+                          {integrations.docs ? "Docs Connected ✓ (click to disconnect)" : "Connect Docs"}
+                        </button>
+                      </>
+                    )
                   )}
 
                   {card.slug === "study-plan" && (
-                    <>
+                    !isUltraUser ? (
                       <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (integrations.sheets) {
-                            disconnectGoogleTool("sheets");
-                          } else {
-                            connectGoogleTool("sheets");
-                          }
-                        }}
-                        className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.sheets ? "bg-gray-600 hover:bg-gray-700" : "bg-gray-500 hover:bg-gray-600"}`}
+                        onClick={handleUpgradePlanClick}
+                        className="mt-2 px-4 py-2 rounded-lg text-sm bg-gray-500 hover:bg-gray-600 text-white cursor-pointer transition block mx-auto"
                       >
-                        {integrations.sheets ? "Sheets Connected ✓ (click to disconnect)" : "Connect Sheets"}
+                        Upgrade Plan
                       </button>
+                    ) : (
+                      <>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (integrations.sheets) {
+                              disconnectGoogleTool("sheets");
+                            } else {
+                              connectGoogleTool("sheets");
+                            }
+                          }}
+                          className={`mt-2 px-4 py-2 rounded-lg text-sm cursor-pointer transition ${
+                            integrations.sheets
+                              ? "bg-gray-600 hover:bg-gray-700"
+                              : "bg-gray-500 hover:bg-gray-600"
+                          }`}
+                        >
+                          {integrations.sheets ? "Sheets Connected ✓ (click to disconnect)" : "Connect Sheets"}
+                        </button>
 
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (integrations.gmail) {
-                            disconnectGoogleTool("gmail");
-                          } else {
-                            connectGoogleTool("gmail");
-                          }
-                        }}
-                        className={`mt-2 ml-2 px-4 py-2 rounded-lg text-sm ${integrations.gmail ? "bg-gray-600 hover:bg-gray-700" : "bg-gray-500 hover:bg-gray-600"}`}
-                      >
-                        {integrations.gmail ? "Gmail Connected ✓ (click to disconnect)" : "Connect Gmail"}
-                      </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (integrations.gmail) {
+                              disconnectGoogleTool("gmail");
+                            } else {
+                              connectGoogleTool("gmail");
+                            }
+                          }}
+                          className={`mt-2 ml-2 px-4 py-2 rounded-lg text-sm cursor-pointer transition ${
+                            integrations.gmail
+                              ? "bg-gray-600 hover:bg-gray-700"
+                              : "bg-gray-500 hover:bg-gray-600"
+                          }`}
+                        >
+                          {integrations.gmail ? "Gmail Connected ✓ (click to disconnect)" : "Connect Gmail"}
+                        </button>
 
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (integrations.docs) {
-                            disconnectGoogleTool("docs");
-                          } else {
-                            connectGoogleTool("docs");
-                          }
-                        }}
-                        className={`mt-2 ml-2 px-4 py-2 rounded-lg text-sm ${integrations.docs ? "bg-gray-600 hover:bg-gray-700" : "bg-gray-500 hover:bg-gray-600"}`}
-                      >
-                        {integrations.docs ? "Docs Connected ✓ (click to disconnect)" : "Connect Docs"}
-                      </button>
-                    </>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (integrations.docs) {
+                              disconnectGoogleTool("docs");
+                            } else {
+                              connectGoogleTool("docs");
+                            }
+                          }}
+                          className={`mt-2 ml-2 px-4 py-2 rounded-lg text-sm cursor-pointer transition ${
+                            integrations.docs
+                              ? "bg-gray-600 hover:bg-gray-700"
+                              : "bg-gray-500 hover:bg-gray-600"
+                          }`}
+                        >
+                          {integrations.docs ? "Docs Connected ✓ (click to disconnect)" : "Connect Docs"}
+                        </button>
+                      </>
+                    )
                   )}
                 </div>
               ))}
@@ -1711,7 +1818,7 @@ function App() {
             <img src={user.picture} alt="Profile" className="w-24 h-24 rounded-full object-cover border-2" />
             <p className="text-xl font-medium">{user.name}</p>
             <p className="text-sm text-gray-600">{user.email}</p>
-            <p className="text-sm font-medium text-gray-400">Current Plan: FREE</p>
+            <p className="text-sm font-medium text-gray-400">Current Plan: {currentPlanName}</p>
 
             <button
               onClick={() => {

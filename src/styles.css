@@ -791,26 +791,15 @@ a:hover {
 
 /* Explore doodle style */
 .explore-doodle {
-  font-family: 'Shadows Into Light', cursive;
-  font-size: 5rem;
-  font-weight: normal;
-  letter-spacing: 2px;
+  font-family: "Comic Sans MS", cursive, sans-serif;
+  font-size: 4.6rem;
+  font-weight: 800;
+  letter-spacing: -1px;
   text-align: center;
   margin: 1.5rem 0 2.5rem 0;
-  background: linear-gradient(90deg, #4285F4, #EA4335, #FBBC05, #34A853, #4285F4);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  color: transparent;
-  
-  text-shadow: 
-    3px 3px 0 #EA4335,
-    -2px -2px 0 #FBBC05,
-    2px -2px 0 #34A853,
-    -3px 3px 0 #4285F4,
-    1px 1px 4px rgba(0,0,0,0.15);
-  
-  animation: doodle-wobble 4s infinite ease-in-out;
+  color: #2f2f2f;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  animation: doodle-wobble 5s infinite ease-in-out;
 }
 
 @keyframes doodle-wobble {
@@ -819,26 +808,23 @@ a:hover {
 }
 
 [data-theme="dark"] .explore-doodle {
-  text-shadow: 
-    4px 4px 0 #f87171,
-    -3px -3px 0 #fde047,
-    3px -3px 0 #86efac,
-    -4px 4px 0 #60a5fa,
-    2px 2px 8px rgba(0,0,0,0.4);
+  color: #d9d9d9;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
 }
 
-.explore-doodle {
-  font-family: "Comic Sans MS", cursive, sans-serif;
-  font-weight: 900;
-  letter-spacing: -2px;
+.republic-doodle,
+.gandhi-doodle,
+.christmas-doodle,
+.newyear-doodle,
+.holi-doodle,
+.halloween-doodle,
+.diwali-doodle {
+  color: inherit;
+  background: none;
+  -webkit-background-clip: initial;
+  -webkit-text-fill-color: currentColor;
+  text-shadow: inherit;
 }
-
-.republic-doodle { background: linear-gradient(90deg, #FF9933, #FFFFFF, #138808); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-.gandhi-doodle { color: #FF9933; }
-.christmas-doodle { color: #D32F2F; text-shadow: 0 0 15px #fff; }
-.newyear-doodle { color: #FFD700; text-shadow: 0 0 20px gold; }
-.holi-doodle { background: linear-gradient(90deg, #FF0000, #FF9900, #00FF00); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
-.diwali-doodle { color: #FFAA00; text-shadow: 0 0 15px orange; }
 
 /* ==================== AI LOADING ANIMATION ==================== */
 .ai-loading-wrap {
