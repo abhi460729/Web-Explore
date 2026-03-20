@@ -363,7 +363,7 @@ app.post("/api/auth/google", async (req, res) => {
             connect: { id: freePlan.id },
           },
           subscriptionStart: new Date(),
-          subscriptionEnd: new Date(2099, 11, 31),
+          subscriptionEnd: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
         },
         include: { currentPlan: true },
       });
