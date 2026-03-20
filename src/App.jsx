@@ -66,12 +66,20 @@ function App() {
   const [theme, setTheme] = useState(localStorage.getItem("theme") || "light");
   const [values, setValues] = useState({});
   const [attachedInvestorFile, setAttachedInvestorFile] = useState(null);
+  const [attachedDocFile, setAttachedDocFile] = useState(null);
+  const [isExecutingWorkflow, setIsExecutingWorkflow] = useState(false);
   const [integrations, setIntegrations] = useState({
     gmail: false,
     calendar: false,
     docs: false,
     sheets: false
   });
+  const [toast, setToast] = useState(null);
+
+  const showToast = (message, type = "info") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
 
   const user = JSON.parse(localStorage.getItem("user") || "{}");
 
@@ -218,7 +226,7 @@ function App() {
     {
       title: "Catch me up on Enterprise or Individual communications",
       slug: "gmail-catchup",
-      promptTemplate: "Connect Gmail, fetch recent emails in real time, and summarize key updates based on my topic and label.",
+      promptTemplate: "Connect Gmail, fetch recent emails in real time, and summarize key updates based on my topic and label",
       fields: [
         { key: "catchup_topic", label: "What do you want to track?", placeholder: "e.g. Passport", required: true },
         { key: "gmail_label", label: "Gmail Label", placeholder: "e.g. Book Appointment", required: true },
@@ -228,7 +236,7 @@ function App() {
     {
       title: "Catch me up on Enterprise or Individual meetings and tasks",
       slug: "project-reminders",
-      promptTemplate: "Connect Google Calendar, fetch meetings and tasks in real time, and summarize key updates.",
+      promptTemplate: "Connect Google Calendar, fetch meetings and tasks in real time, and summarize key updates",
       fields: [
         { key: "task subject", label: "Focus topic (optional)", placeholder: "e.g. Website Redesign, Client Onboarding", required: false },
         { key: "past_hours", label: "Recent Past Window in Hours (optional)", placeholder: "e.g. 2", required: false },
@@ -260,6 +268,20 @@ function App() {
         { key: "doc_url", label: "Google Doc URL", placeholder: "https://docs.google.com/document/d/...", required: true },
         { key: "recipient_emails", label: "Fallback Recipient Emails (optional)", placeholder: "email1@domain.com, email2@domain.com", required: false },
         { key: "default_subject", label: "Default Subject (optional)", placeholder: "Quick intro - startup fit", required: false }
+      ]
+    },
+    {
+      title: "Learning Roadmap",
+      slug: "study-plan",
+      promptTemplate: "Create a study roadmap in Google Docs, generate practice questions in Google Sheets, and send recurring progress emails via Gmail.",
+      fields: [
+        { key: "topic", label: "Study Topic", placeholder: "e.g. Data Structures and Algorithms", required: true },
+        { key: "current_level", label: "Current Level (optional)", placeholder: "e.g. beginner, intermediate, advanced", required: false },
+        { key: "goal", label: "Goal (optional)", placeholder: "e.g. crack interviews, master system design, exam prep", required: false },
+        { key: "duration_months", label: "Duration in Months", placeholder: "e.g. 3", required: false },
+        { key: "interval_days", label: "Email Interval (days)", placeholder: "e.g. 1 for daily, 2, 7", required: false },
+        { key: "questions_per_day", label: "Questions Per Day", placeholder: "e.g. 20", required: false },
+        { key: "recipient_emails", label: "Recipient Emails (optional)", placeholder: "email1@domain.com, email2@domain.com", required: false }
       ]
     }
   ];
@@ -370,7 +392,6 @@ function App() {
       const user = JSON.parse(localStorage.getItem("user") || "{}");
 
       if (!user?.id) {
-        alert("Please login first");
         return;
       }
 
@@ -383,7 +404,7 @@ function App() {
       const data = await res.json();
 
       if (!res.ok) {
-        alert(data.error || "Failed to connect");
+        console.error(data.error || "Failed to connect");
         return;
       }
 
@@ -393,7 +414,6 @@ function App() {
 
     } catch (err) {
       console.error(err);
-      alert("Connection failed");
     }
 
   };
@@ -403,7 +423,6 @@ function App() {
       const user = JSON.parse(localStorage.getItem("user") || "{}");
 
       if (!user?.id) {
-        alert("Please login first");
         return;
       }
 
@@ -417,15 +436,13 @@ function App() {
       const data = await res.json();
 
       if (!res.ok) {
-        alert(data.error || "Failed to disconnect");
+        console.error(data.error || "Failed to disconnect");
         return;
       }
 
       setIntegrations((prev) => ({ ...prev, [tool]: false }));
-      alert(`${tool.charAt(0).toUpperCase() + tool.slice(1)} disconnected successfully.`);
     } catch (err) {
       console.error(err);
-      alert("Disconnect failed");
     }
   };
 
@@ -436,7 +453,6 @@ function App() {
     const user = JSON.parse(localStorage.getItem("user") || "{}");
 
     if (!user?.id) {
-      alert("Please login first");
       return;
     }
 
@@ -449,7 +465,7 @@ function App() {
     const data = await res.json();
 
     if (!res.ok) {
-      alert(data.error || "Failed to fetch meetings");
+      console.error(data.error || "Failed to fetch meetings");
       return;
     }
 
@@ -462,7 +478,6 @@ function App() {
   } catch (err) {
 
     console.error(err);
-    alert("Failed to fetch calendar meetings");
 
   }
 
@@ -470,7 +485,7 @@ function App() {
 
   const handleMicClick = () => {
     if (!recognition) {
-      alert("Speech recognition is not supported in this browser.");
+      console.warn("Speech recognition is not supported in this browser.");
       return;
     }
     if (listening) {
@@ -501,6 +516,49 @@ function App() {
       }
       return match;
     });
+  };
+
+  const renderMarkdown = (text) => {
+    if (!text) return "";
+    let html = text
+      // Escape HTML entities first
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      // Headers
+      .replace(/^#### (.+)$/gm, "<h4>$1</h4>")
+      .replace(/^### (.+)$/gm, "<h3>$1</h3>")
+      .replace(/^## (.+)$/gm, "<h2>$1</h2>")
+      .replace(/^# (.+)$/gm, "<h1>$1</h1>")
+      // Bold + italic
+      .replace(/\*\*\*(.+?)\*\*\*/g, "<strong><em>$1</em></strong>")
+      // Bold
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      // Italic
+      .replace(/\*(.+?)\*/g, "<em>$1</em>")
+      // Inline code
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      // Horizontal rule
+      .replace(/^[-*]{3,}$/gm, "<hr/>")
+      // Unordered list items
+      .replace(/^[\-\*\•] (.+)$/gm, "<li>$1</li>")
+      // Ordered list items
+      .replace(/^\d+\. (.+)$/gm, "<li>$1</li>");
+
+    // Wrap consecutive <li> in <ul>
+    html = html.replace(/(<li>.*<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`);
+
+    // Paragraphs — blank line separates blocks
+    const blocks = html.split(/\n{2,}/);
+    html = blocks.map((block) => {
+      block = block.trim();
+      if (!block) return "";
+      if (/^<(h[1-4]|ul|ol|li|hr|blockquote)/.test(block)) return block;
+      // Single newlines inside a paragraph → <br>
+      return `<p>${block.replace(/\n/g, "<br/>")}</p>`;
+    }).join("\n");
+
+    return html;
   };
 
   function shouldShowHeading(text) {
@@ -678,12 +736,27 @@ function App() {
 
     const isValid = workflow.slug === "pitch-emails"
       ? (values.startup_name?.trim?.() || "").length > 0 && (((values.sheet_url?.trim?.() || "").length > 0) || !!attachedInvestorFile)
+      : workflow.slug === "send-doc-emails"
+      ? !!attachedDocFile || (values.doc_url?.trim?.() || "").length > 0
       : workflow.fields.every(
           (f) => !f.required || (values[f.key]?.trim?.() || "").length > 0
         );
 
+    const integrationWorkflowSlugs = new Set([
+      "gmail-catchup",
+      "project-reminders",
+      "research-competitors",
+      "pitch-emails",
+      "send-doc-emails",
+      "study-plan"
+    ]);
+    const isIntegrationWorkflow = integrationWorkflowSlugs.has(workflow.slug);
+
     const handleGenerate = async () => {
-        if (!isValid) return;
+      if (!isValid || isExecutingWorkflow) return;
+      setIsExecutingWorkflow(true);
+
+      try {
 
       if (workflow.slug === "gmail-catchup") {
 
@@ -705,11 +778,9 @@ function App() {
         const data = await res.json();
 
         if (!res.ok) {
-          alert(data.error || "Automation failed");
+          console.error(data.error || "Automation failed");
           return;
         }
-
-        alert("Gmail catch-up summary generated successfully!");
 
         navigate("/search", {
           state: {
@@ -719,7 +790,7 @@ function App() {
         });
 
         } catch (err) {
-          alert("Failed to start automation");
+          console.error("Failed to start automation", err);
         }
 
         return;
@@ -745,15 +816,13 @@ function App() {
           const data = await res.json();
 
           if (!res.ok) {
-            alert(data.error || "Failed to generate competitor report");
+            console.error(data.error || "Failed to generate competitor report");
             return;
           }
 
           if (data.docUrl) {
             window.open(data.docUrl, "_blank");
           }
-
-          alert("Competitor report generated in Google Docs successfully!");
 
           navigate("/search", {
             state: {
@@ -763,7 +832,7 @@ function App() {
           });
 
         } catch (err) {
-          alert("Failed to start competitor docs automation");
+          console.error("Failed to start competitor docs automation", err);
         }
 
         return;
@@ -793,7 +862,7 @@ function App() {
           const data = await res.json();
 
           if (!res.ok) {
-            alert(data.error || "Failed to fetch meetings and tasks");
+            console.error(data.error || "Failed to fetch meetings and tasks");
             return;
           }
 
@@ -801,8 +870,6 @@ function App() {
           const finalPrompt = focusTopic
             ? `${summaryPrompt}\n\nFocus topic: ${focusTopic}\nInstructions:\n1) Prioritize only focus-related items first.\n2) If no exact matches found, clearly say no direct match and then provide at most 2 closest items.\n3) Keep output concise with: Top Updates, Action Items, and Priority.`
             : summaryPrompt;
-
-          alert("Calendar catch-up generated successfully!");
 
           navigate("/search", {
             state: {
@@ -812,7 +879,7 @@ function App() {
           });
 
         } catch (err) {
-          alert("Failed to start calendar automation");
+          console.error("Failed to start calendar automation", err);
         }
 
         return;
@@ -851,15 +918,13 @@ function App() {
           const data = await res.json();
 
           if (!res.ok) {
-            alert(data.error || "Failed to generate pitch emails");
+            console.error(data.error || "Failed to generate pitch emails");
             return;
           }
 
           if (data.docUrl) {
             window.open(data.docUrl, "_blank");
           }
-
-          alert("Pitch email drafts created in Google Docs successfully!");
 
           navigate("/search", {
             state: {
@@ -868,7 +933,7 @@ function App() {
             }
           });
         } catch (err) {
-          alert("Failed to start pitch email automation");
+          console.error("Failed to start pitch email automation", err);
         }
 
         return;
@@ -877,27 +942,39 @@ function App() {
       if (workflow.slug === "send-doc-emails") {
 
         try {
-          const res = await fetch("/api/workflows/send-doc-emails/start", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-user-id": user?.id || ""
-            },
-            body: JSON.stringify({
-              doc_url: values.doc_url || "",
-              recipient_emails: values.recipient_emails || "",
-              default_subject: values.default_subject || ""
-            })
-          });
+          const hasLocalFile = !!attachedDocFile;
+
+          const res = hasLocalFile
+            ? await fetch("/api/workflows/send-doc-emails/upload-start", {
+                method: "POST",
+                headers: { "x-user-id": user?.id || "" },
+                body: (() => {
+                  const formData = new FormData();
+                  formData.append("doc_file", attachedDocFile);
+                  formData.append("recipient_emails", values.recipient_emails || "");
+                  formData.append("default_subject", values.default_subject || "");
+                  return formData;
+                })()
+              })
+            : await fetch("/api/workflows/send-doc-emails/start", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "x-user-id": user?.id || ""
+                },
+                body: JSON.stringify({
+                  doc_url: values.doc_url || "",
+                  recipient_emails: values.recipient_emails || "",
+                  default_subject: values.default_subject || ""
+                })
+              });
 
           const data = await res.json();
 
           if (!res.ok) {
-            alert(data.error || "Failed to send emails from doc");
+            console.error(data.error || "Failed to send emails from doc");
             return;
           }
-
-          alert(`Email sending completed. Sent: ${data.sentCount || 0}, Failed: ${data.failedCount || 0}`);
 
           navigate("/search", {
             state: {
@@ -906,7 +983,54 @@ function App() {
             }
           });
         } catch (err) {
-          alert("Failed to start doc-to-gmail automation");
+          console.error("Failed to start doc-to-gmail automation", err);
+        }
+
+        return;
+      }
+
+      if (workflow.slug === "study-plan") {
+
+        try {
+          const res = await fetch("/api/workflows/study-plan/start", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-user-id": user?.id || ""
+            },
+            body: JSON.stringify({
+              topic: values.topic || "",
+              current_level: values.current_level || "",
+              goal: values.goal || "",
+              duration_months: values.duration_months || "",
+              interval_days: values.interval_days || "",
+              questions_per_day: values.questions_per_day || "",
+              recipient_emails: values.recipient_emails || ""
+            })
+          });
+
+          const data = await res.json();
+
+          if (!res.ok) {
+            console.error(data.error || "Failed to start learning roadmap workflow");
+            return;
+          }
+
+          if (data.docUrl) {
+            window.open(data.docUrl, "_blank");
+          }
+          if (data.sheetUrl) {
+            window.open(data.sheetUrl, "_blank");
+          }
+
+          navigate("/search", {
+            state: {
+              prefillPrompt: data.summary || "Summarize my learning roadmap, practice sheet, and email schedule",
+              autoRunMode: "ai"
+            }
+          });
+        } catch (err) {
+          console.error("Failed to start study-plan automation", err);
         }
 
         return;
@@ -919,6 +1043,9 @@ function App() {
       });
 
       navigate("/search", { state: { prefillPrompt: finalPrompt } });
+      } finally {
+        setIsExecutingWorkflow(false);
+      }
     };
 
     return (
@@ -1019,6 +1146,55 @@ function App() {
                       >
                         Open Google Docs
                       </button>
+
+                      <label className="px-4 py-2 rounded-xl bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-sm font-medium text-gray-800 dark:text-gray-200 cursor-pointer">
+                        Attach From Local Computer
+                        <input
+                          type="file"
+                          accept=".txt,.md"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0] || null;
+                            setAttachedDocFile(file);
+                            if (file) handleChange("doc_url", "");
+                          }}
+                        />
+                      </label>
+
+                      {attachedDocFile && (
+                        <button
+                          type="button"
+                          onClick={() => setAttachedDocFile(null)}
+                          className="px-4 py-2 rounded-xl bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-sm font-medium text-gray-800 dark:text-gray-200"
+                        >
+                          Remove File
+                        </button>
+                      )}
+
+                      {attachedDocFile && (
+                        <p className="w-full text-sm text-gray-600 dark:text-gray-300">
+                          Attached: {attachedDocFile.name}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {workflow.slug === "study-plan" && field.key === "topic" && (
+                    <div className="mt-3 flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        onClick={() => window.open("https://docs.google.com/document/", "_blank")}
+                        className="px-4 py-2 rounded-xl bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-sm font-medium text-gray-800 dark:text-gray-200"
+                      >
+                        Open Google Docs
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => window.open("https://docs.google.com/spreadsheets/", "_blank")}
+                        className="px-4 py-2 rounded-xl bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-sm font-medium text-gray-800 dark:text-gray-200"
+                      >
+                        Open Google Sheets
+                      </button>
                     </div>
                   )}
                 </div>
@@ -1027,14 +1203,24 @@ function App() {
 
             <button
               onClick={handleGenerate}
-              disabled={!isValid}
+              disabled={!isValid || isExecutingWorkflow}
               className={`mt-8 w-full py-4 rounded-2xl font-semibold text-lg transition-all ${
-                isValid
+                isValid && !isExecutingWorkflow
                   ? "bg-gray-700 hover:bg-gray-800 text-white"
                   : "bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed"
               }`}
             >
-              Generate Query & Go to Search →
+              {isExecutingWorkflow ? (
+                <span className="inline-flex items-center gap-3">
+                  <span className="workflow-orb-loader" aria-hidden="true">
+                    <span />
+                    <span />
+                    <span />
+                    <span />
+                  </span>
+                  Executing Task...
+                </span>
+              ) : isIntegrationWorkflow ? "Execute Task" : "Generate Query & Go to Search →"}
             </button>
           </div>
         </div>
@@ -1079,9 +1265,7 @@ function App() {
                       onClick={(e) => {
                         e.stopPropagation();
                         if (integrations.gmail) {
-                          if (window.confirm("Disconnect Gmail?")) {
-                            disconnectGoogleTool("gmail");
-                          }
+                          disconnectGoogleTool("gmail");
                         } else {
                           connectGoogleTool("gmail");
                         }
@@ -1097,9 +1281,7 @@ function App() {
                       onClick={(e) => {
                         e.stopPropagation();
                         if (integrations.calendar) {
-                          if (window.confirm("Disconnect Calendar?")) {
-                            disconnectGoogleTool("calendar");
-                          }
+                          disconnectGoogleTool("calendar");
                         } else {
                           connectGoogleTool("calendar");
                         }
@@ -1115,9 +1297,7 @@ function App() {
                       onClick={(e) => {
                         e.stopPropagation();
                         if (integrations.docs) {
-                          if (window.confirm("Disconnect Docs?")) {
-                            disconnectGoogleTool("docs");
-                          }
+                          disconnectGoogleTool("docs");
                         } else {
                           connectGoogleTool("docs");
                         }
@@ -1134,9 +1314,7 @@ function App() {
                         onClick={(e) => {
                           e.stopPropagation();
                           if (integrations.sheets) {
-                            if (window.confirm("Disconnect Sheets?")) {
-                              disconnectGoogleTool("sheets");
-                            }
+                            disconnectGoogleTool("sheets");
                           } else {
                             connectGoogleTool("sheets");
                           }
@@ -1150,9 +1328,7 @@ function App() {
                         onClick={(e) => {
                           e.stopPropagation();
                           if (integrations.docs) {
-                            if (window.confirm("Disconnect Docs?")) {
-                              disconnectGoogleTool("docs");
-                            }
+                            disconnectGoogleTool("docs");
                           } else {
                             connectGoogleTool("docs");
                           }
@@ -1170,9 +1346,7 @@ function App() {
                         onClick={(e) => {
                           e.stopPropagation();
                           if (integrations.gmail) {
-                            if (window.confirm("Disconnect Gmail?")) {
-                              disconnectGoogleTool("gmail");
-                            }
+                            disconnectGoogleTool("gmail");
                           } else {
                             connectGoogleTool("gmail");
                           }
@@ -1186,9 +1360,53 @@ function App() {
                         onClick={(e) => {
                           e.stopPropagation();
                           if (integrations.docs) {
-                            if (window.confirm("Disconnect Docs?")) {
-                              disconnectGoogleTool("docs");
-                            }
+                            disconnectGoogleTool("docs");
+                          } else {
+                            connectGoogleTool("docs");
+                          }
+                        }}
+                        className={`mt-2 ml-2 px-4 py-2 rounded-lg text-sm ${integrations.docs ? "bg-gray-600 hover:bg-gray-700" : "bg-gray-500 hover:bg-gray-600"}`}
+                      >
+                        {integrations.docs ? "Docs Connected ✓ (click to disconnect)" : "Connect Docs"}
+                      </button>
+                    </>
+                  )}
+
+                  {card.slug === "study-plan" && (
+                    <>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (integrations.sheets) {
+                            disconnectGoogleTool("sheets");
+                          } else {
+                            connectGoogleTool("sheets");
+                          }
+                        }}
+                        className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.sheets ? "bg-gray-600 hover:bg-gray-700" : "bg-gray-500 hover:bg-gray-600"}`}
+                      >
+                        {integrations.sheets ? "Sheets Connected ✓ (click to disconnect)" : "Connect Sheets"}
+                      </button>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (integrations.gmail) {
+                            disconnectGoogleTool("gmail");
+                          } else {
+                            connectGoogleTool("gmail");
+                          }
+                        }}
+                        className={`mt-2 ml-2 px-4 py-2 rounded-lg text-sm ${integrations.gmail ? "bg-gray-600 hover:bg-gray-700" : "bg-gray-500 hover:bg-gray-600"}`}
+                      >
+                        {integrations.gmail ? "Gmail Connected ✓ (click to disconnect)" : "Connect Gmail"}
+                      </button>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (integrations.docs) {
+                            disconnectGoogleTool("docs");
                           } else {
                             connectGoogleTool("docs");
                           }
@@ -1259,7 +1477,7 @@ function App() {
       if (plan.disabled) return;
 
       if (!user || !user.id) {
-        alert("Please sign in first to upgrade your plan");
+        showToast("Please sign in first to upgrade your plan", "error");
         navigate("/");
         return;
       }
@@ -1305,15 +1523,15 @@ function App() {
               });
 
               if (verifyResponse.ok) {
-                alert(`Successfully upgraded to ${plan.name} plan!`);
-                window.location.reload();
+                showToast(`Successfully upgraded to ${plan.name} plan!`, "success");
+                setTimeout(() => window.location.reload(), 1500);
               } else {
                 const error = await verifyResponse.json();
-                alert(`Payment verification failed: ${error.error}`);
+                showToast(`Payment verification failed: ${error.error}`, "error");
               }
             } catch (err) {
               console.error("Payment verification error:", err);
-              alert("Payment verification failed. Please contact support.");
+              showToast("Payment verification failed. Please contact support.", "error");
             }
           },
           prefill: {
@@ -1333,12 +1551,24 @@ function App() {
         rzp.open();
       } catch (err) {
         console.error("Payment error:", err);
-        alert(`Payment failed: ${err.message}`);
+        showToast(`Payment failed: ${err.message}`, "error");
       }
     };
 
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-950 py-12 px-4 sm:px-6 lg:px-8">
+        {toast && (
+          <div
+            className={`fixed top-5 right-5 z-50 flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-lg text-white text-sm font-medium transition-all ${
+              toast.type === "success" ? "bg-green-600" : toast.type === "error" ? "bg-red-600" : "bg-blue-600"
+            }`}
+          >
+            <span>{toast.message}</span>
+            <button onClick={() => setToast(null)} className="ml-2 opacity-70 hover:opacity-100">
+              <X size={15} />
+            </button>
+          </div>
+        )}
         <div className="max-w-6xl mx-auto">
           <div className="mb-10 flex justify-center">
             <button
@@ -1516,7 +1746,7 @@ function App() {
       </div>
 
       <div className="content-area">
-        <div className="full-width-container">
+        <div className={`full-width-container${response ? " has-response" : ""}`}>
           {location.pathname === "/search" && (
             <>
               <h1 className={doodle.className}>{doodle.text}</h1>
@@ -1537,7 +1767,11 @@ function App() {
                       </button>
                       <div className="model-dropdown-content">
                         {models.map((model) => (
-                          <button key={model} onClick={() => selectModel(model)}>
+                          <button
+                            key={model}
+                            className={selectedModel === model ? "model-option selected" : "model-option"}
+                            onClick={() => selectModel(model)}
+                          >
                             {model}
                           </button>
                         ))}
@@ -1560,21 +1794,24 @@ function App() {
           )}
 
           {loading && (
-            <div className="mt-8 flex justify-center">
-              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-gray-600"></div>
+            <div className="ai-loading-wrap">
+              <div className="ai-orb-ring">
+                <span /><span /><span /><span />
+              </div>
+              <p className="ai-loading-text">Generating response…</p>
             </div>
           )}
 
           {error && <p className="text-red-500 mt-6 text-center">{error}</p>}
 
           {response && mode === "search" && (
-            <div className="mt-8 p-4 answer-container w-full">
+            <div className="answer-container w-full">
               {queryParam && shouldShowHeading(response.text) && (
-                <h1 className="text-4xl font-handwritten text-center mb-6">
+                <h2 className="text-2xl font-semibold text-center mb-5">
                   {decodeURIComponent(queryParam)}
-                </h1>
+                </h2>
               )}
-              <div className="tabs flex gap-3 mb-6">
+              <div className="tabs">
                 <button className={`tab ${activeTab === "answer" ? "active" : ""}`} onClick={() => showTab("answer")}>
                   Answer
                 </button>
@@ -1584,63 +1821,93 @@ function App() {
               </div>
               <div className="content">
                 <div className={`content-section ${activeTab === "answer" ? "block" : "hidden"}`}>
-                  <p
+                  <div
+                    className="ai-response-body"
                     dangerouslySetInnerHTML={{
                       __html: DOMPurify.sanitize(
-                        makeCitationsClickable(response.summary || "No answer available", response.citations || []),
+                        makeCitationsClickable(renderMarkdown(response.summary || "No answer available"), response.citations || []),
                         { ADD_ATTR: ["target", "rel"] }
                       ),
                     }}
                   />
                   {response.suggestions?.length > 0 && (
-                    <div className="follow-up mt-6">
-                      <h3>People also ask</h3>
-                      {response.suggestions.map((s, i) => (
-                        <button key={i} onClick={() => handleSuggestionClick(s)}>
-                          {s}
-                        </button>
-                      ))}
+                    <div className="paa-section">
+                      <h3 className="paa-title">People also ask</h3>
+                      <div className="paa-list">
+                        {response.suggestions.map((s, i) => (
+                          <button key={i} className="paa-chip" onClick={() => handleSuggestionClick(s)}>
+                            <span className="paa-icon">&#x1F50D;</span>
+                            <span>{s}</span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
                 </div>
                 <div className={`content-section ${activeTab === "sources" ? "block" : "hidden"}`}>
-                  <ul>
-                    {response.citations?.map((src, i) => (
-                      <li key={i} className="source-item">
-                        <a href={src.url} target="_blank" rel="noopener noreferrer">
-                          {src.title || src.url}
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
+                  {response.citations?.length > 0 ? (
+                    <div className="sources-grid">
+                      {response.citations.map((src, i) => {
+                        let hostname = "";
+                        try { hostname = new URL(src.url).hostname.replace("www.", ""); } catch {}
+                        return (
+                          <a
+                            key={i}
+                            href={src.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="source-card"
+                          >
+                            <div className="source-card-header">
+                              <img
+                                src={`https://www.google.com/s2/favicons?sz=32&domain=${hostname}`}
+                                alt=""
+                                className="source-favicon"
+                                onError={(e) => { e.target.style.display = "none"; }}
+                              />
+                              <span className="source-hostname">{hostname || "Source"}</span>
+                              <span className="source-num">{i + 1}</span>
+                            </div>
+                            <p className="source-title">{src.title || src.url}</p>
+                          </a>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="sources-empty">No sources available for this response.</p>
+                  )}
                 </div>
               </div>
             </div>
           )}
 
           {response && mode === "ai" && (
-            <div className="mt-8 p-4 response-container w-full">
+            <div className="response-container w-full">
               {queryParam && shouldShowHeading(response.summary) && (
-                <h1 className="text-4xl font-handwritten text-center mb-6">
+                <h2 className="text-2xl font-semibold text-center mb-5">
                   {decodeURIComponent(queryParam)}
-                </h1>
+                </h2>
               )}
-              <p
+              <div
+                className="ai-response-body"
                 dangerouslySetInnerHTML={{
                   __html: DOMPurify.sanitize(
-                    makeCitationsClickable(response.text || "No response available", []),
+                    makeCitationsClickable(renderMarkdown(response.text || "No response available"), []),
                     { ADD_ATTR: ["target", "rel"] }
                   ),
                 }}
               />
               {response.suggestions?.length > 0 && (
-                <div className="follow-up mt-6">
-                  <h3>People also ask</h3>
-                  {response.suggestions.map((s, i) => (
-                    <button key={i} onClick={() => handleSuggestionClick(s)}>
-                      {s}
-                    </button>
-                  ))}
+                <div className="paa-section">
+                  <h3 className="paa-title">People also ask</h3>
+                  <div className="paa-list">
+                    {response.suggestions.map((s, i) => (
+                      <button key={i} className="paa-chip" onClick={() => handleSuggestionClick(s)}>
+                        <span className="paa-icon">&#x1F50D;</span>
+                        <span>{s}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

@@ -69,6 +69,7 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }
 });
+const studyPlanSchedules = new Map();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1663,11 +1664,522 @@ app.post("/api/workflows/send-doc-emails/start", async (req, res) => {
   }
 });
 
-app.get("/api/calendar/today-meetings", async (req, res) => {
+app.post("/api/workflows/send-doc-emails/upload-start", upload.single("doc_file"), async (req, res) => {
   const userId = req.headers["x-user-id"];
+  const recipientEmails = String(req.body?.recipient_emails || "").trim();
+  const defaultSubject = String(req.body?.default_subject || "").trim() || "Quick intro from my startup";
+
   if (!userId) {
     return res.status(401).json({ error: "User not authenticated" });
   }
+
+  if (!req.file) {
+    return res.status(400).json({ error: "doc_file is required" });
+  }
+
+  const docText = req.file.buffer.toString("utf-8").replace(/\r\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+  if (!docText) {
+    return res.status(400).json({ error: "Uploaded file is empty" });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { gmailTokens: true }
+    });
+
+    if (!user?.gmailTokens) {
+      return res.status(400).json({ error: "Please connect Gmail first" });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    const parsedDrafts = [];
+    const blocks = docText
+      .split(/\n(?=\s*#{0,6}\s*Investor:)/i)
+      .map((b) => b.trim())
+      .filter(Boolean);
+
+    for (const block of blocks) {
+      const investorLineMatch = block.match(/^\s*#{0,6}\s*Investor:\s*(.+)$/im);
+      if (!investorLineMatch) continue;
+
+      const investorLine = investorLineMatch[1].trim();
+      const emailMatch = investorLine.match(/\(([^)\s]+@[^)\s]+)\)/);
+      const email = String(emailMatch?.[1] || "").trim();
+      const name = String(investorLine.replace(/\(([^)]+)\)/, "")).trim();
+
+      if (!emailRegex.test(email)) continue;
+
+      const subjectMatch = block.match(/^\s*Subject:\s*(.+)$/im);
+      const subject = String(subjectMatch?.[1] || "").trim() || defaultSubject;
+
+      const bodyStartMatch = block.match(/^\s*Body:\s*$/im) || block.match(/^\s*Body:\s*(.+)$/im);
+      if (!bodyStartMatch) continue;
+
+      let body = "";
+      if (bodyStartMatch[1]) {
+        body = String(bodyStartMatch[1]).trim();
+      } else {
+        const idx = block.search(/^\s*Body:\s*$/im);
+        body = idx >= 0 ? block.slice(idx).replace(/^\s*Body:\s*\n?/i, "").trim() : "";
+      }
+
+      if (!body) continue;
+
+      parsedDrafts.push({ name, email, subject, body });
+    }
+
+    const fallbackRecipients = recipientEmails
+      .split(/[;,\n]/)
+      .map((e) => e.trim())
+      .filter((e) => emailRegex.test(e));
+
+    let emailsToSend = parsedDrafts;
+
+    if (emailsToSend.length === 0) {
+      if (fallbackRecipients.length === 0) {
+        return res.status(400).json({
+          error: "No sendable drafts found in file. Use format: Investor/Subject/Body or provide fallback recipient emails."
+        });
+      }
+      emailsToSend = fallbackRecipients.map((email) => ({
+        name: "",
+        email,
+        subject: defaultSubject,
+        body: docText.slice(0, 8000)
+      }));
+    }
+
+    const gmailOAuth = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    gmailOAuth.setCredentials(user.gmailTokens);
+
+    const gmail = google.gmail({ version: "v1", auth: gmailOAuth });
+
+    const sent = [];
+    const failed = [];
+
+    for (const item of emailsToSend.slice(0, 50)) {
+      try {
+        const bodyText = item.body.replace(/\n{3,}/g, "\n\n").trim();
+        const mime = [
+          `To: ${item.email}`,
+          `Subject: ${item.subject}`,
+          "MIME-Version: 1.0",
+          'Content-Type: text/plain; charset="UTF-8"',
+          "",
+          bodyText,
+        ].join("\r\n");
+
+        const raw = Buffer.from(mime)
+          .toString("base64")
+          .replace(/\+/g, "-")
+          .replace(/\//g, "_")
+          .replace(/=+$/, "");
+
+        await gmail.users.messages.send({ userId: "me", requestBody: { raw } });
+        sent.push(item.email);
+      } catch (sendErr) {
+        failed.push({ email: item.email, reason: sendErr.message });
+      }
+    }
+
+    res.json({
+      success: true,
+      parsedCount: parsedDrafts.length,
+      sentCount: sent.length,
+      failedCount: failed.length,
+      sentRecipients: sent,
+      failedRecipients: failed,
+      summary: `Processed ${emailsToSend.length} draft emails from uploaded file. Sent: ${sent.length}, Failed: ${failed.length}.`
+    });
+  } catch (err) {
+    console.error("[Send Doc Emails Upload Error]:", err.message);
+    res.status(500).json({ error: "Failed to send emails from uploaded file", details: err.message });
+  }
+});
+
+app.post("/api/workflows/study-plan/start", async (req, res) => {
+  const userId = req.headers["x-user-id"];
+  const topic = String(req.body?.topic || "").trim();
+  const currentLevel = String(req.body?.current_level || "").trim() || "intermediate";
+  const goal = String(req.body?.goal || "").trim() || "consistent skill growth";
+  const durationMonthsRaw = parseInt(req.body?.duration_months, 10);
+  const intervalDaysRaw = parseInt(req.body?.interval_days, 10);
+  const questionsPerDayRaw = parseInt(req.body?.questions_per_day, 10);
+  const recipientEmailsRaw = String(req.body?.recipient_emails || "").trim();
+
+  const durationMonths = Number.isFinite(durationMonthsRaw)
+    ? Math.max(1, Math.min(12, durationMonthsRaw))
+    : 3;
+  const intervalDays = Number.isFinite(intervalDaysRaw)
+    ? Math.max(1, Math.min(30, intervalDaysRaw))
+    : 1;
+  const questionsPerDay = Number.isFinite(questionsPerDayRaw)
+    ? Math.max(5, Math.min(200, questionsPerDayRaw))
+    : 20;
+
+  if (!userId) {
+    return res.status(401).json({ error: "User not authenticated" });
+  }
+
+  if (!topic) {
+    return res.status(400).json({ error: "topic is required" });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, gmailTokens: true, docsTokens: true, sheetsTokens: true }
+    });
+
+    if (!user?.gmailTokens) {
+      return res.status(400).json({ error: "Please connect Gmail first" });
+    }
+    if (!user?.docsTokens) {
+      return res.status(400).json({ error: "Please connect Google Docs first" });
+    }
+    if (!user?.sheetsTokens) {
+      return res.status(400).json({ error: "Please connect Google Sheets first" });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const recipients = recipientEmailsRaw
+      .split(/[;,\n]/)
+      .map((e) => e.trim())
+      .filter((e) => emailRegex.test(e));
+
+    if (recipients.length === 0 && user?.email && emailRegex.test(user.email)) {
+      recipients.push(user.email);
+    }
+
+    if (recipients.length === 0) {
+      return res.status(400).json({ error: "Please provide at least one valid recipient email" });
+    }
+
+    const docsOAuth = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    docsOAuth.setCredentials(user.docsTokens);
+    const docs = google.docs({ version: "v1", auth: docsOAuth });
+
+    const sheetsOAuth = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    sheetsOAuth.setCredentials(user.sheetsTokens);
+    const sheets = google.sheets({ version: "v4", auth: sheetsOAuth });
+
+    const gmailOAuth = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    gmailOAuth.setCredentials(user.gmailTokens);
+    const gmail = google.gmail({ version: "v1", auth: gmailOAuth });
+
+    const weeks = durationMonths * 4;
+    const totalDays = durationMonths * 30;
+
+    const roadmapPrompt = `Create a ${durationMonths}-month study roadmap for topic: ${topic}.
+
+Requirements:
+- Weekly milestones (${weeks} weeks total)
+- Daily study routine template
+- Revision plan
+- Mock/practice strategy
+- End each week with measurable outcomes
+  - Personalize for level: ${currentLevel}
+  - Primary goal: ${goal}
+
+Format with headings and concise bullet points.`;
+
+    const practicePrompt = `Generate a structured daily practice plan for ${topic} for ${totalDays} days.
+
+Return as plain text rows in this exact format:
+  Day | Week | Difficulty | Question Focus | Practice Task | Question Count | Target Time | Checkpoint
+
+  Rules:
+  - One row per day
+  - Question Count should be ${questionsPerDay}
+  - Personalize for level: ${currentLevel}
+  - Align with goal: ${goal}
+  - Keep tasks realistic and progressive.`;
+
+    const [roadmapRes, practiceRes] = await Promise.all([
+      generateText({ model: openai("gpt-4o-mini"), prompt: roadmapPrompt }),
+      generateText({ model: openai("gpt-4o-mini"), prompt: practicePrompt })
+    ]);
+
+    const roadmapText = roadmapRes.text || `Study roadmap for ${topic}`;
+    const practiceText = practiceRes.text || "Day | Week | Difficulty | Question Focus | Practice Task | Question Count | Target Time | Checkpoint | Sample Questions";
+
+    const headerRow = ["Day", "Week", "Difficulty", "Question Focus", "Practice Task", "Question Count", "Target Time", "Checkpoint", "Sample Questions"];
+
+    const buildFallbackRows = () => {
+      const fallbackRows = [];
+      for (let day = 1; day <= totalDays; day += 1) {
+        const week = Math.ceil(day / 7);
+        const phase = day <= totalDays / 3 ? "foundation" : day <= (2 * totalDays) / 3 ? "intermediate" : "advanced";
+        const difficulty = phase === "foundation" ? "Easy-Medium" : phase === "intermediate" ? "Medium" : "Medium-Hard";
+        const focus = `${topic} - ${phase} concepts`;
+        const task = `Solve ${questionsPerDay} questions and review mistakes`;
+        const targetTime = `${Math.min(240, Math.max(60, questionsPerDay * 6))} min`;
+        const checkpoint = `Log accuracy and top 3 learnings (Day ${day})`;
+        const sampleQuestions = [
+          `1) Core ${topic} concept drill`,
+          `2) Applied ${topic} scenario for ${goal}`,
+          `3) Timed mixed-practice set`
+        ].join(" ; ");
+
+        fallbackRows.push([
+          String(day),
+          `Week ${week}`,
+          difficulty,
+          focus,
+          task,
+          String(questionsPerDay),
+          targetTime,
+          checkpoint,
+          sampleQuestions
+        ]);
+      }
+      return fallbackRows;
+    };
+
+    const docCreated = await docs.documents.create({
+      requestBody: {
+        title: `${topic} - ${durationMonths} Month Study Roadmap`
+      }
+    });
+    const documentId = docCreated.data.documentId;
+
+    const spreadsheet = await sheets.spreadsheets.create({
+      requestBody: {
+        properties: {
+          title: `${topic} - Practice Questions (${durationMonths}M)`
+        },
+        sheets: [{ properties: { title: "Practice Plan" } }]
+      }
+    });
+
+    const spreadsheetId = spreadsheet.data.spreadsheetId;
+    const sheetUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
+    const docUrl = `https://docs.google.com/document/d/${documentId}/edit`;
+
+    const parsedRowsMap = new Map();
+    const rawLines = practiceText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+
+    for (const line of rawLines) {
+      if (/^\|?\s*[-:]{3,}/.test(line)) continue;
+      const normalized = line.replace(/^\|/, "").replace(/\|$/, "");
+      const cells = normalized.split("|").map((cell) => cell.trim());
+      if (cells.length < 8) continue;
+
+      if (/^day$/i.test(cells[0])) continue;
+
+      const dayNum = parseInt(String(cells[0]).replace(/[^0-9]/g, ""), 10);
+      if (!Number.isFinite(dayNum) || dayNum < 1 || dayNum > totalDays) continue;
+
+      parsedRowsMap.set(dayNum, [
+        String(dayNum),
+        cells[1] || `Week ${Math.ceil(dayNum / 7)}`,
+        cells[2] || "Medium",
+        cells[3] || `${topic} focused practice`,
+        cells[4] || `Solve ${questionsPerDay} questions`,
+        cells[5] || String(questionsPerDay),
+        cells[6] || `${Math.min(240, Math.max(60, questionsPerDay * 6))} min`,
+        cells[7] || `Update progress log for Day ${dayNum}`,
+        cells[8] || `1) Core ${topic} drill ; 2) Applied set ; 3) Timed revision`
+      ]);
+    }
+
+    const fallbackRows = buildFallbackRows();
+    const mergedRows = fallbackRows.map((row) => {
+      const day = parseInt(row[0], 10);
+      return parsedRowsMap.get(day) || row;
+    });
+    const valuesToWrite = [headerRow, ...mergedRows];
+
+    await sheets.spreadsheets.values.update({
+      spreadsheetId,
+      range: "Practice Plan!A1",
+      valueInputOption: "RAW",
+      requestBody: {
+        values: valuesToWrite
+      }
+    });
+
+    const practicePreviewLines = mergedRows
+      .slice(0, Math.min(14, mergedRows.length))
+      .map((r) => `Day ${r[0]} | ${r[2]} | ${r[3]} | Questions: ${r[5]} | Sample: ${r[8]}`)
+      .join("\n");
+
+    const roadmapDocText = [
+      `${topic} Study Roadmap`,
+      `Current Level: ${currentLevel}`,
+      `Goal: ${goal}`,
+      `Duration: ${durationMonths} months (${weeks} weeks)` ,
+      `Questions Per Day: ${questionsPerDay}`,
+      `Email Interval: every ${intervalDays} day(s)`,
+      "",
+      roadmapText,
+      "",
+      "Practice Questions Preview (First 14 Days)",
+      practicePreviewLines,
+      "",
+      `Full practice question plan is in Google Sheets: ${sheetUrl}`
+    ].join("\n");
+
+    await docs.documents.batchUpdate({
+      documentId,
+      requestBody: {
+        requests: [
+          {
+            insertText: {
+              location: { index: 1 },
+              text: roadmapDocText
+            }
+          }
+        ]
+      }
+    });
+
+    const findRowByDay = (dayNumber) => {
+      const normalized = valuesToWrite.slice(1);
+      const target = normalized.find((r) => String(r[0] || "").replace(/[^0-9]/g, "") === String(dayNumber));
+      return target || null;
+    };
+
+    const sendStudyEmail = async (subjectPrefix = "Study Plan Update", dayNumber = 1) => {
+      const safeDay = Math.max(1, Math.min(totalDays, dayNumber));
+      const todayRow = findRowByDay(safeDay);
+
+      let dailyBrief = "Review roadmap, solve planned questions, and update your progress notes.";
+      try {
+        const briefRes = await generateText({
+          model: openai("gpt-4o-mini"),
+          prompt: `Create a concise daily study brief.
+Topic: ${topic}
+Current Level: ${currentLevel}
+Goal: ${goal}
+Day: ${safeDay} of ${totalDays}
+Questions today: ${questionsPerDay}
+Practice row: ${todayRow ? todayRow.join(" | ") : "N/A"}
+
+Output:
+1) Focus for today (1 line)
+2) Questions strategy (2 bullets)
+3) Checkpoint before sleep (1 line)`
+        });
+        if (briefRes?.text?.trim()) {
+          dailyBrief = briefRes.text.trim();
+        }
+      } catch (briefErr) {
+        console.error("[Study Plan Daily Brief Error]:", briefErr.message);
+      }
+
+      const body = [
+        `Topic: ${topic}`,
+        `Current Level: ${currentLevel}`,
+        `Goal: ${goal}`,
+        `Day Progress: ${safeDay}/${totalDays}`,
+        `Duration: ${durationMonths} month(s)`,
+        `Practice horizon: ${weeks} weeks`,
+        `Questions Today: ${questionsPerDay}`,
+        `Interval: every ${intervalDays} day(s)`,
+        "",
+        todayRow
+          ? `Today's Plan: ${todayRow[2]} | ${todayRow[3]} | ${todayRow[4]} | ${todayRow[6]} | Sample Questions: ${todayRow[8]}`
+          : "Today's Plan: Follow roadmap milestones and complete focused practice.",
+        "",
+        dailyBrief,
+        "",
+        `Roadmap (Google Docs): ${docUrl}`,
+        `Practice Questions (Google Sheets): ${sheetUrl}`,
+        "",
+        "Reply to this email with what you completed today for personalized next-step adjustments."
+      ].join("\n");
+
+      for (const recipient of recipients) {
+        const mime = [
+          `To: ${recipient}`,
+          `Subject: ${subjectPrefix}: ${topic}`,
+          "MIME-Version: 1.0",
+          'Content-Type: text/plain; charset="UTF-8"',
+          "",
+          body,
+        ].join("\r\n");
+
+        const raw = Buffer.from(mime)
+          .toString("base64")
+          .replace(/\+/g, "-")
+          .replace(/\//g, "_")
+          .replace(/=+$/, "");
+
+        await gmail.users.messages.send({
+          userId: "me",
+          requestBody: { raw }
+        });
+      }
+    };
+
+    await sendStudyEmail("Study Plan Started", 1);
+
+    const scheduleKey = `${userId}:${topic.toLowerCase()}`;
+    const existing = studyPlanSchedules.get(scheduleKey);
+    if (existing?.timer) clearInterval(existing.timer);
+
+    const intervalMs = intervalDays * 24 * 60 * 60 * 1000;
+    const startAt = Date.now();
+    const timer = setInterval(async () => {
+      try {
+        const elapsedDays = Math.floor((Date.now() - startAt) / (24 * 60 * 60 * 1000));
+        const dayNumber = Math.min(totalDays, 1 + elapsedDays);
+        await sendStudyEmail("Study Plan Reminder", dayNumber);
+      } catch (mailErr) {
+        console.error("[Study Plan Scheduler Email Error]:", mailErr.message);
+      }
+    }, intervalMs);
+
+    studyPlanSchedules.set(scheduleKey, {
+      timer,
+      startAt,
+      totalDays,
+      topic,
+      recipients,
+      questionsPerDay,
+      intervalDays
+    });
+
+    res.json({
+      success: true,
+      docUrl,
+      sheetUrl,
+      recipients,
+      intervalDays,
+      durationMonths,
+      questionsPerDay,
+      generatedQuestionRows: mergedRows.length,
+      summary: `Created personalized ${durationMonths}-month roadmap for ${topic}, generated ${mergedRows.length} daily question rows (${questionsPerDay} questions/day), and scheduled progress emails every ${intervalDays} day(s) for ${recipients.length} recipient(s).`
+    });
+  } catch (err) {
+    console.error("[Study Plan Workflow Error]:", err.message);
+    res.status(500).json({
+      error: "Failed to create study roadmap workflow",
+      details: err.message
+    });
+  }
+});
+
+app.get("/api/calendar/today-meetings", async (req, res) => {
 
   try {
     const user = await prisma.user.findUnique({
