@@ -27,6 +27,8 @@ import { OAuth2Client } from "google-auth-library";
 import { existsSync } from "fs";
 import Razorpay from "razorpay";
 import crypto from "crypto";
+import multer from "multer";
+import XLSX from "xlsx";
 
 // Prisma
 import prismaPkg from '@prisma/client';
@@ -63,6 +65,10 @@ const TOOL_SCOPES = {
 
 const app = express();
 const port = process.env.PORT || 8080;
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }
+});
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1118,6 +1124,540 @@ Output:`;
     console.error("[Research Competitors Error]:", err.message);
     res.status(500).json({
       error: "Failed to generate competitor report in Google Docs",
+      details: err.message
+    });
+  }
+});
+
+app.post("/api/workflows/pitch-emails/upload-start", upload.single("investors_file"), async (req, res) => {
+  const userId = req.headers["x-user-id"];
+  const startupName = String(req.body?.startup_name || "").trim();
+  const file = req.file;
+
+  if (!userId) {
+    return res.status(401).json({ error: "User not authenticated" });
+  }
+
+  if (!startupName) {
+    return res.status(400).json({ error: "startup_name is required" });
+  }
+
+  if (!file) {
+    return res.status(400).json({ error: "Please attach a local CSV/XLSX file" });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { docsTokens: true }
+    });
+
+    if (!user?.docsTokens) {
+      return res.status(400).json({ error: "Please connect Google Docs first" });
+    }
+
+    const fileName = String(file.originalname || "").toLowerCase();
+    let rows = [];
+
+    if (fileName.endsWith(".csv")) {
+      const text = file.buffer.toString("utf-8");
+      rows = text
+        .split(/\r?\n/)
+        .filter((line) => line.trim().length > 0)
+        .map((line) => line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map((v) => v.replace(/^"|"$/g, "").trim()));
+    } else if (fileName.endsWith(".xlsx") || fileName.endsWith(".xls")) {
+      const wb = XLSX.read(file.buffer, { type: "buffer" });
+      const firstSheetName = wb.SheetNames?.[0];
+      if (!firstSheetName) {
+        return res.status(400).json({ error: "Uploaded spreadsheet has no sheet" });
+      }
+      rows = XLSX.utils.sheet_to_json(wb.Sheets[firstSheetName], { header: 1, raw: false });
+    } else {
+      return res.status(400).json({ error: "Unsupported file type. Use CSV, XLSX, or XLS" });
+    }
+
+    if (!rows || rows.length < 2) {
+      return res.status(400).json({ error: "File should contain a header row and at least one investor row" });
+    }
+
+    const normalize = (s = "") => s.toString().trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const headers = rows[0].map(normalize);
+
+    const findCol = (aliases = []) => {
+      for (const alias of aliases) {
+        const idx = headers.findIndex((h) => h === alias || h.includes(alias));
+        if (idx !== -1) return idx;
+      }
+      return -1;
+    };
+
+    const nameIdx = findCol(["name", "investor name", "full name"]);
+    const emailIdx = findCol(["email", "email address", "investor email"]);
+    const focusIdx = findCol(["focus areas", "focus area", "thesis", "investment thesis", "focus"]);
+
+    if (nameIdx === -1 || emailIdx === -1) {
+      return res.status(400).json({ error: "File must contain Name and Email columns" });
+    }
+
+    const investors = rows
+      .slice(1)
+      .map((r) => ({
+        name: String(r[nameIdx] || "").trim(),
+        email: String(r[emailIdx] || "").trim(),
+        focus: focusIdx !== -1 ? String(r[focusIdx] || "").trim() : ""
+      }))
+      .filter((r) => r.name && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email))
+      .slice(0, 25);
+
+    if (investors.length === 0) {
+      return res.status(400).json({ error: "No valid investor rows found in uploaded file" });
+    }
+
+    const investorLines = investors
+      .map((inv, i) => `${i + 1}. Name: ${inv.name} | Email: ${inv.email} | Focus Areas: ${inv.focus || "N/A"}`)
+      .join("\n");
+
+    const pitchPrompt = `You are a startup fundraising assistant. Draft personalized cold emails for each investor.
+
+Startup name: ${startupName}
+Investors:
+${investorLines}
+
+Output format for each investor:
+### Investor: <Name> (<Email>)
+Subject: <one line>
+Body:
+<120-170 words, personalized to focus area when available, concise and professional>
+
+Keep each draft unique and practical.`;
+
+    const aiRes = await generateText({
+      model: openai("gpt-4o-mini"),
+      prompt: pitchPrompt,
+    });
+
+    const draftsText = aiRes.text || "No drafts generated.";
+
+    const docsOAuth = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    docsOAuth.setCredentials(user.docsTokens);
+
+    const docs = google.docs({ version: "v1", auth: docsOAuth });
+
+    const created = await docs.documents.create({
+      requestBody: {
+        title: `Personalized Pitch Emails - ${startupName}`
+      }
+    });
+
+    const documentId = created.data.documentId;
+    const docText = [
+      "Personalized Pitch Email Drafts",
+      `Startup: ${startupName}`,
+      `Source File: ${file.originalname}`,
+      `Generated For: ${investors.length} investors`,
+      "",
+      draftsText
+    ].join("\n");
+
+    await docs.documents.batchUpdate({
+      documentId,
+      requestBody: {
+        requests: [
+          {
+            insertText: {
+              location: { index: 1 },
+              text: docText
+            }
+          }
+        ]
+      }
+    });
+
+    const docUrl = `https://docs.google.com/document/d/${documentId}/edit`;
+
+    res.json({
+      success: true,
+      docUrl,
+      draftedCount: investors.length,
+      summary: `Created ${investors.length} personalized pitch email drafts for ${startupName} from local file in Google Docs.`
+    });
+  } catch (err) {
+    console.error("[Pitch Emails Upload Workflow Error]:", err.message);
+    res.status(500).json({
+      error: "Failed to generate personalized pitch emails from local file",
+      details: err.message
+    });
+  }
+});
+
+app.post("/api/workflows/pitch-emails/start", async (req, res) => {
+  const userId = req.headers["x-user-id"];
+  const sheetUrl = String(req.body?.sheet_url || "").trim();
+  const startupName = String(req.body?.startup_name || "").trim();
+
+  if (!userId) {
+    return res.status(401).json({ error: "User not authenticated" });
+  }
+
+  if (!sheetUrl) {
+    return res.status(400).json({ error: "sheet_url is required" });
+  }
+
+  if (!startupName) {
+    return res.status(400).json({ error: "startup_name is required" });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { sheetsTokens: true, docsTokens: true }
+    });
+
+    if (!user?.sheetsTokens) {
+      return res.status(400).json({ error: "Please connect Google Sheets first" });
+    }
+
+    if (!user?.docsTokens) {
+      return res.status(400).json({ error: "Please connect Google Docs first" });
+    }
+
+    const sheetMatch = sheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+    if (!sheetMatch?.[1]) {
+      return res.status(400).json({ error: "Invalid Google Sheet URL" });
+    }
+    const spreadsheetId = sheetMatch[1];
+
+    const sheetsOAuth = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    sheetsOAuth.setCredentials(user.sheetsTokens);
+
+    const sheets = google.sheets({ version: "v4", auth: sheetsOAuth });
+
+    const sheetMeta = await sheets.spreadsheets.get({ spreadsheetId });
+    const firstSheetTitle = sheetMeta.data.sheets?.[0]?.properties?.title;
+
+    if (!firstSheetTitle) {
+      return res.status(400).json({ error: "No tab found in the provided Google Sheet" });
+    }
+
+    const valuesRes = await sheets.spreadsheets.values.get({
+      spreadsheetId,
+      range: `${firstSheetTitle}!A1:Z300`
+    });
+
+    const rows = valuesRes.data.values || [];
+    if (rows.length < 2) {
+      return res.status(400).json({ error: "Sheet should contain header row and at least one investor row" });
+    }
+
+    const normalize = (s = "") => s.toString().trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const headers = rows[0].map(normalize);
+
+    const findCol = (aliases = []) => {
+      for (const alias of aliases) {
+        const idx = headers.findIndex((h) => h === alias || h.includes(alias));
+        if (idx !== -1) return idx;
+      }
+      return -1;
+    };
+
+    const nameIdx = findCol(["name", "investor name", "full name"]);
+    const emailIdx = findCol(["email", "email address", "investor email"]);
+    const focusIdx = findCol(["focus areas", "focus area", "thesis", "investment thesis", "focus"]);
+
+    if (nameIdx === -1 || emailIdx === -1) {
+      return res.status(400).json({
+        error: "Sheet must contain Name and Email columns (Focus Areas recommended)"
+      });
+    }
+
+    const investors = rows
+      .slice(1)
+      .map((r) => ({
+        name: String(r[nameIdx] || "").trim(),
+        email: String(r[emailIdx] || "").trim(),
+        focus: focusIdx !== -1 ? String(r[focusIdx] || "").trim() : ""
+      }))
+      .filter((r) => r.name && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(r.email))
+      .slice(0, 25);
+
+    if (investors.length === 0) {
+      return res.status(400).json({ error: "No valid investor rows found in the sheet" });
+    }
+
+    const investorLines = investors
+      .map((inv, i) => `${i + 1}. Name: ${inv.name} | Email: ${inv.email} | Focus Areas: ${inv.focus || "N/A"}`)
+      .join("\n");
+
+    const pitchPrompt = `You are a startup fundraising assistant. Draft personalized cold emails for each investor.
+
+Startup name: ${startupName}
+Investors:
+${investorLines}
+
+Output format for each investor:
+### Investor: <Name> (<Email>)
+Subject: <one line>
+Body:
+<120-170 words, personalized to focus area when available, concise and professional>
+
+Keep each draft unique and practical.`;
+
+    const aiRes = await generateText({
+      model: openai("gpt-4o-mini"),
+      prompt: pitchPrompt,
+    });
+
+    const draftsText = aiRes.text || "No drafts generated.";
+
+    const docsOAuth = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    docsOAuth.setCredentials(user.docsTokens);
+
+    const docs = google.docs({ version: "v1", auth: docsOAuth });
+
+    const created = await docs.documents.create({
+      requestBody: {
+        title: `Personalized Pitch Emails - ${startupName}`
+      }
+    });
+
+    const documentId = created.data.documentId;
+    const docText = [
+      `Personalized Pitch Email Drafts`,
+      `Startup: ${startupName}`,
+      `Source Sheet: ${sheetUrl}`,
+      `Generated For: ${investors.length} investors`,
+      "",
+      draftsText
+    ].join("\n");
+
+    await docs.documents.batchUpdate({
+      documentId,
+      requestBody: {
+        requests: [
+          {
+            insertText: {
+              location: { index: 1 },
+              text: docText
+            }
+          }
+        ]
+      }
+    });
+
+    const docUrl = `https://docs.google.com/document/d/${documentId}/edit`;
+
+    res.json({
+      success: true,
+      docUrl,
+      draftedCount: investors.length,
+      summary: `Created ${investors.length} personalized pitch email drafts for ${startupName} in Google Docs.`
+    });
+  } catch (err) {
+    console.error("[Pitch Emails Workflow Error]:", err.message);
+    res.status(500).json({
+      error: "Failed to generate personalized pitch emails",
+      details: err.message
+    });
+  }
+});
+
+app.post("/api/workflows/send-doc-emails/start", async (req, res) => {
+  const userId = req.headers["x-user-id"];
+  const docUrl = String(req.body?.doc_url || "").trim();
+  const recipientEmails = String(req.body?.recipient_emails || "").trim();
+  const defaultSubject = String(req.body?.default_subject || "").trim() || "Quick intro from my startup";
+
+  if (!userId) {
+    return res.status(401).json({ error: "User not authenticated" });
+  }
+
+  if (!docUrl) {
+    return res.status(400).json({ error: "doc_url is required" });
+  }
+
+  const docMatch = docUrl.match(/\/document\/d\/([a-zA-Z0-9-_]+)/);
+  if (!docMatch?.[1]) {
+    return res.status(400).json({ error: "Invalid Google Doc URL" });
+  }
+  const documentId = docMatch[1];
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { gmailTokens: true, docsTokens: true }
+    });
+
+    if (!user?.gmailTokens) {
+      return res.status(400).json({ error: "Please connect Gmail first" });
+    }
+
+    if (!user?.docsTokens) {
+      return res.status(400).json({ error: "Please connect Google Docs first" });
+    }
+
+    const docsOAuth = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    docsOAuth.setCredentials(user.docsTokens);
+
+    const docs = google.docs({ version: "v1", auth: docsOAuth });
+    const doc = await docs.documents.get({ documentId });
+
+    const toPlainText = (document) => {
+      const content = document?.data?.body?.content || [];
+      let out = "";
+
+      content.forEach((item) => {
+        const elements = item?.paragraph?.elements || [];
+        elements.forEach((el) => {
+          const t = el?.textRun?.content || "";
+          out += t;
+        });
+      });
+
+      return out.replace(/\u000b/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+    };
+
+    const docText = toPlainText(doc);
+    if (!docText) {
+      return res.status(400).json({ error: "Google Doc is empty" });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    const parsedDrafts = [];
+    const normalizedDocText = docText.replace(/\r\n/g, "\n");
+    const blocks = normalizedDocText
+      .split(/\n(?=\s*#{0,6}\s*Investor:)/i)
+      .map((b) => b.trim())
+      .filter(Boolean);
+
+    for (const block of blocks) {
+      const investorLineMatch = block.match(/^\s*#{0,6}\s*Investor:\s*(.+)$/im);
+      if (!investorLineMatch) continue;
+
+      const investorLine = investorLineMatch[1].trim();
+      const emailMatch = investorLine.match(/\(([^)\s]+@[^)\s]+)\)/);
+      const email = String(emailMatch?.[1] || "").trim();
+      const name = String(investorLine.replace(/\(([^)]+)\)/, "")).trim();
+
+      if (!emailRegex.test(email)) continue;
+
+      const subjectMatch = block.match(/^\s*Subject:\s*(.+)$/im);
+      const subject = String(subjectMatch?.[1] || "").trim() || defaultSubject;
+
+      const bodyStartMatch = block.match(/^\s*Body:\s*$/im) || block.match(/^\s*Body:\s*(.+)$/im);
+      if (!bodyStartMatch) continue;
+
+      let body = "";
+      if (bodyStartMatch[1]) {
+        body = String(bodyStartMatch[1]).trim();
+      } else {
+        const idx = block.search(/^\s*Body:\s*$/im);
+        body = idx >= 0 ? block.slice(idx).replace(/^\s*Body:\s*\n?/i, "").trim() : "";
+      }
+
+      if (!body) continue;
+
+      parsedDrafts.push({
+        name,
+        email,
+        subject,
+        body
+      });
+    }
+
+    const fallbackRecipients = recipientEmails
+      .split(/[;,\n]/)
+      .map((e) => e.trim())
+      .filter((e) => emailRegex.test(e));
+
+    let emailsToSend = parsedDrafts;
+
+    if (emailsToSend.length === 0) {
+      if (fallbackRecipients.length === 0) {
+        return res.status(400).json({
+          error: "No sendable drafts found in document. Use format: Investor/Subject/Body or provide fallback recipient emails."
+        });
+      }
+
+      const genericBody = docText.slice(0, 8000);
+      emailsToSend = fallbackRecipients.map((email) => ({
+        name: "",
+        email,
+        subject: defaultSubject,
+        body: genericBody
+      }));
+    }
+
+    const gmailOAuth = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    gmailOAuth.setCredentials(user.gmailTokens);
+
+    const gmail = google.gmail({ version: "v1", auth: gmailOAuth });
+
+    const sent = [];
+    const failed = [];
+
+    for (const item of emailsToSend.slice(0, 50)) {
+      try {
+        const bodyText = item.body.replace(/\n{3,}/g, "\n\n").trim();
+        const mime = [
+          `To: ${item.email}`,
+          `Subject: ${item.subject}`,
+          "MIME-Version: 1.0",
+          'Content-Type: text/plain; charset="UTF-8"',
+          "",
+          bodyText,
+        ].join("\r\n");
+
+        const raw = Buffer.from(mime)
+          .toString("base64")
+          .replace(/\+/g, "-")
+          .replace(/\//g, "_")
+          .replace(/=+$/, "");
+
+        await gmail.users.messages.send({
+          userId: "me",
+          requestBody: { raw }
+        });
+
+        sent.push(item.email);
+      } catch (sendErr) {
+        failed.push({ email: item.email, reason: sendErr.message });
+      }
+    }
+
+    res.json({
+      success: true,
+      parsedCount: parsedDrafts.length,
+      sentCount: sent.length,
+      failedCount: failed.length,
+      sentRecipients: sent,
+      failedRecipients: failed,
+      summary: `Processed ${emailsToSend.length} draft emails from doc. Sent: ${sent.length}, Failed: ${failed.length}.`
+    });
+  } catch (err) {
+    console.error("[Send Doc Emails Workflow Error]:", err.message);
+    res.status(500).json({
+      error: "Failed to send emails from Google Doc",
       details: err.message
     });
   }

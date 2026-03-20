@@ -65,6 +65,7 @@ function App() {
   const [activeTab, setActiveTab] = useState("answer");
   const [theme, setTheme] = useState(localStorage.getItem("theme") || "light");
   const [values, setValues] = useState({});
+  const [attachedInvestorFile, setAttachedInvestorFile] = useState(null);
   const [integrations, setIntegrations] = useState({
     gmail: false,
     calendar: false,
@@ -245,10 +246,20 @@ function App() {
     {
       title: "Personalized Pitch Emails",
       slug: "pitch-emails",
-      promptTemplate: "I have a Google Sheet with potential investors (columns: Name, Email, Focus Areas). Draft personalized cold pitch emails for each one highlighting why my startup fits their investment thesis - Gmail + Google Sheets",
+      promptTemplate: "I have a Google Sheet with potential investors (columns: Name, Email, Focus Areas). Draft personalized cold pitch emails for each one highlighting why my startup fits their investment thesis and save all drafts in Google Docs.",
       fields: [
         { key: "sheet_url", label: "Google Sheet URL", placeholder: "https://docs.google.com/spreadsheets/d/...", required: true },
         { key: "startup_name", label: "Your Startup Name", placeholder: "e.g. Taskify AI", required: true }
+      ]
+    },
+    {
+      title: "Send Pitch Emails from Google Docs",
+      slug: "send-doc-emails",
+      promptTemplate: "Attach a Google Doc containing pitch email drafts and send those emails directly via Gmail.",
+      fields: [
+        { key: "doc_url", label: "Google Doc URL", placeholder: "https://docs.google.com/document/d/...", required: true },
+        { key: "recipient_emails", label: "Fallback Recipient Emails (optional)", placeholder: "email1@domain.com, email2@domain.com", required: false },
+        { key: "default_subject", label: "Default Subject (optional)", placeholder: "Quick intro - startup fit", required: false }
       ]
     }
   ];
@@ -665,9 +676,11 @@ function App() {
       setValues((prev) => ({ ...prev, [key]: value }));
     };
 
-    const isValid = workflow.fields.every(
-      (f) => !f.required || (values[f.key]?.trim?.() || "").length > 0
-    );
+    const isValid = workflow.slug === "pitch-emails"
+      ? (values.startup_name?.trim?.() || "").length > 0 && (((values.sheet_url?.trim?.() || "").length > 0) || !!attachedInvestorFile)
+      : workflow.fields.every(
+          (f) => !f.required || (values[f.key]?.trim?.() || "").length > 0
+        );
 
     const handleGenerate = async () => {
         if (!isValid) return;
@@ -805,6 +818,100 @@ function App() {
         return;
       }
 
+      if (workflow.slug === "pitch-emails") {
+
+        try {
+          const hasLocalFile = !!attachedInvestorFile;
+
+          const res = hasLocalFile
+            ? await fetch("/api/workflows/pitch-emails/upload-start", {
+                method: "POST",
+                headers: {
+                  "x-user-id": user?.id || ""
+                },
+                body: (() => {
+                  const formData = new FormData();
+                  formData.append("investors_file", attachedInvestorFile);
+                  formData.append("startup_name", values.startup_name || "");
+                  return formData;
+                })()
+              })
+            : await fetch("/api/workflows/pitch-emails/start", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "x-user-id": user?.id || ""
+                },
+                body: JSON.stringify({
+                  sheet_url: values.sheet_url || "",
+                  startup_name: values.startup_name || ""
+                })
+              });
+
+          const data = await res.json();
+
+          if (!res.ok) {
+            alert(data.error || "Failed to generate pitch emails");
+            return;
+          }
+
+          if (data.docUrl) {
+            window.open(data.docUrl, "_blank");
+          }
+
+          alert("Pitch email drafts created in Google Docs successfully!");
+
+          navigate("/search", {
+            state: {
+              prefillPrompt: data.summary || "Summarize my investor pitch email drafts",
+              autoRunMode: "ai"
+            }
+          });
+        } catch (err) {
+          alert("Failed to start pitch email automation");
+        }
+
+        return;
+      }
+
+      if (workflow.slug === "send-doc-emails") {
+
+        try {
+          const res = await fetch("/api/workflows/send-doc-emails/start", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-user-id": user?.id || ""
+            },
+            body: JSON.stringify({
+              doc_url: values.doc_url || "",
+              recipient_emails: values.recipient_emails || "",
+              default_subject: values.default_subject || ""
+            })
+          });
+
+          const data = await res.json();
+
+          if (!res.ok) {
+            alert(data.error || "Failed to send emails from doc");
+            return;
+          }
+
+          alert(`Email sending completed. Sent: ${data.sentCount || 0}, Failed: ${data.failedCount || 0}`);
+
+          navigate("/search", {
+            state: {
+              prefillPrompt: data.summary || "Summarize my email send activity",
+              autoRunMode: "ai"
+            }
+          });
+        } catch (err) {
+          alert("Failed to start doc-to-gmail automation");
+        }
+
+        return;
+      }
+
 
       let finalPrompt = workflow.promptTemplate;
       Object.entries(values).forEach(([k, v]) => {
@@ -840,10 +947,16 @@ function App() {
             <div className="space-y-6">
               {workflow.fields.map((field) => (
                 <div key={field.key}>
+                  {(() => {
+                    const isPitchSheetField = workflow.slug === "pitch-emails" && field.key === "sheet_url";
+                    const showRequired = field.required && !(isPitchSheetField && attachedInvestorFile);
+                    return (
                   <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">
                     {field.label}
-                    {field.required && <span className="text-red-500 ml-1">*</span>}
+                    {showRequired && <span className="text-red-500 ml-1">*</span>}
                   </label>
+                    );
+                  })()}
                   <input
                     type="text"
                     value={values[field.key] || ""}
@@ -852,6 +965,62 @@ function App() {
                     className="w-full px-5 py-4 text-lg border border-gray-300 dark:border-gray-600 rounded-2xl focus:outline-none focus:border-gray-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                     onKeyDown={(e) => e.key === "Enter" && isValid && handleGenerate()}
                   />
+
+                  {workflow.slug === "pitch-emails" && field.key === "sheet_url" && (
+                    <div className="mt-3 flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        onClick={() => window.open("https://docs.google.com/spreadsheets/", "_blank")}
+                        className="px-4 py-2 rounded-xl bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-sm font-medium text-gray-800 dark:text-gray-200"
+                      >
+                        Open Google Sheets
+                      </button>
+
+                      <label className="px-4 py-2 rounded-xl bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-sm font-medium text-gray-800 dark:text-gray-200 cursor-pointer">
+                        Attach From Local Computer
+                        <input
+                          type="file"
+                          accept=".csv,.xlsx,.xls"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0] || null;
+                            setAttachedInvestorFile(file);
+                            if (file) {
+                              handleChange("sheet_url", "");
+                            }
+                          }}
+                        />
+                      </label>
+
+                      {attachedInvestorFile && (
+                        <button
+                          type="button"
+                          onClick={() => setAttachedInvestorFile(null)}
+                          className="px-4 py-2 rounded-xl bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-sm font-medium text-gray-800 dark:text-gray-200"
+                        >
+                          Remove Local File
+                        </button>
+                      )}
+
+                      {attachedInvestorFile && (
+                        <p className="w-full text-sm text-gray-600 dark:text-gray-300">
+                          Attached file: {attachedInvestorFile.name}
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {workflow.slug === "send-doc-emails" && field.key === "doc_url" && (
+                    <div className="mt-3 flex flex-wrap gap-3">
+                      <button
+                        type="button"
+                        onClick={() => window.open("https://docs.google.com/document/", "_blank")}
+                        className="px-4 py-2 rounded-xl bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-sm font-medium text-gray-800 dark:text-gray-200"
+                      >
+                        Open Google Docs
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -960,21 +1129,75 @@ function App() {
                   )}
 
                   {card.slug === "pitch-emails" && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (integrations.sheets) {
-                          if (window.confirm("Disconnect Sheets?")) {
-                            disconnectGoogleTool("sheets");
+                    <>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (integrations.sheets) {
+                            if (window.confirm("Disconnect Sheets?")) {
+                              disconnectGoogleTool("sheets");
+                            }
+                          } else {
+                            connectGoogleTool("sheets");
                           }
-                        } else {
-                          connectGoogleTool("sheets");
-                        }
-                      }}
-                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.sheets ? "bg-gray-600 hover:bg-gray-700" : "bg-gray-500 hover:bg-gray-600"}`}
-                    >
-                      {integrations.sheets ? "Connected ✓ (click to disconnect)" : "Connect Sheets"}
-                    </button>
+                        }}
+                        className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.sheets ? "bg-gray-600 hover:bg-gray-700" : "bg-gray-500 hover:bg-gray-600"}`}
+                      >
+                        {integrations.sheets ? "Sheets Connected ✓ (click to disconnect)" : "Connect Sheets"}
+                      </button>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (integrations.docs) {
+                            if (window.confirm("Disconnect Docs?")) {
+                              disconnectGoogleTool("docs");
+                            }
+                          } else {
+                            connectGoogleTool("docs");
+                          }
+                        }}
+                        className={`mt-2 ml-2 px-4 py-2 rounded-lg text-sm ${integrations.docs ? "bg-gray-600 hover:bg-gray-700" : "bg-gray-500 hover:bg-gray-600"}`}
+                      >
+                        {integrations.docs ? "Docs Connected ✓ (click to disconnect)" : "Connect Docs"}
+                      </button>
+                    </>
+                  )}
+
+                  {card.slug === "send-doc-emails" && (
+                    <>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (integrations.gmail) {
+                            if (window.confirm("Disconnect Gmail?")) {
+                              disconnectGoogleTool("gmail");
+                            }
+                          } else {
+                            connectGoogleTool("gmail");
+                          }
+                        }}
+                        className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.gmail ? "bg-gray-600 hover:bg-gray-700" : "bg-gray-500 hover:bg-gray-600"}`}
+                      >
+                        {integrations.gmail ? "Gmail Connected ✓ (click to disconnect)" : "Connect Gmail"}
+                      </button>
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (integrations.docs) {
+                            if (window.confirm("Disconnect Docs?")) {
+                              disconnectGoogleTool("docs");
+                            }
+                          } else {
+                            connectGoogleTool("docs");
+                          }
+                        }}
+                        className={`mt-2 ml-2 px-4 py-2 rounded-lg text-sm ${integrations.docs ? "bg-gray-600 hover:bg-gray-700" : "bg-gray-500 hover:bg-gray-600"}`}
+                      >
+                        {integrations.docs ? "Docs Connected ✓ (click to disconnect)" : "Connect Docs"}
+                      </button>
+                    </>
                   )}
                 </div>
               ))}
