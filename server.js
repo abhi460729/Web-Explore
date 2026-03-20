@@ -102,6 +102,34 @@ function createQuerySlug(query) {
     .slice(0, 50);
 }
 
+const PERSONAL_EMAIL_PROVIDERS = new Set([
+  "gmail.com",
+  "yahoo.com",
+  "outlook.com",
+  "hotmail.com",
+  "live.com",
+  "icloud.com",
+  "protonmail.com",
+  "aol.com",
+  "zoho.com"
+]);
+
+function extractEmailAddress(fromHeader = "") {
+  const match = fromHeader.match(/<([^>]+)>/);
+  if (match?.[1]) return match[1].trim().toLowerCase();
+  return (fromHeader || "").trim().toLowerCase();
+}
+
+function classifySenderType(email = "") {
+  const domain = email.split("@")[1] || "";
+  if (!domain) return "individual";
+  return PERSONAL_EMAIL_PROVIDERS.has(domain) ? "individual" : "enterprise";
+}
+
+function getHeader(headers = [], key = "") {
+  return headers.find((h) => h.name?.toLowerCase() === key.toLowerCase())?.value || "";
+}
+
 // Simple in-memory per-user throttle (5 sec cooldown)
 const userLastRequest = new Map();
 
@@ -748,6 +776,164 @@ app.post("/api/automate-workflows", async (req, res) => {
     console.error("[Automate Workflows Error]:", err);
     res.status(500).json({
       error: "Failed to access workflow dashboard"
+    });
+  }
+});
+
+app.post("/api/workflows/gmail-catchup/start", async (req, res) => {
+  const userId = req.headers["x-user-id"];
+  const catchupTopic = String(req.body?.catchup_topic || "").trim();
+  const gmailLabel = String(req.body?.gmail_label || "").trim();
+
+  if (!userId) {
+    return res.status(401).json({ error: "User not authenticated" });
+  }
+
+  if (!catchupTopic) {
+    return res.status(400).json({ error: "catchup_topic is required" });
+  }
+
+  if (!gmailLabel) {
+    return res.status(400).json({ error: "gmail_label is required" });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { gmailTokens: true }
+    });
+
+    if (!user?.gmailTokens) {
+      return res.status(400).json({ error: "Please connect Gmail first" });
+    }
+
+    const oauth2Client = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    oauth2Client.setCredentials(user.gmailTokens);
+
+    const gmail = google.gmail({ version: "v1", auth: oauth2Client });
+
+    // Try strict-to-relaxed Gmail queries so user-entered label/topic combinations still work.
+    const searchAttempts = [
+      `in:anywhere newer_than:30d label:"${gmailLabel}" "${catchupTopic}"`,
+      `in:anywhere newer_than:90d "${catchupTopic}" "${gmailLabel}"`,
+      `in:anywhere newer_than:180d "${catchupTopic}"`
+    ];
+
+    let messageRefs = [];
+    let usedQuery = "";
+
+    for (const q of searchAttempts) {
+      const listResp = await gmail.users.messages.list({
+        userId: "me",
+        q,
+        maxResults: 50
+      });
+
+      const found = listResp.data.messages || [];
+      if (found.length > 0) {
+        messageRefs = found;
+        usedQuery = q;
+        break;
+      }
+    }
+
+    if (messageRefs.length === 0) {
+      return res.json({
+        success: true,
+        summary: `No matching emails found for topic \"${catchupTopic}\". I checked label \"${gmailLabel}\" first, then broader Gmail search.`
+      });
+    }
+
+    const detailedMessages = await Promise.all(
+      messageRefs.map(async (m) => {
+        const full = await gmail.users.messages.get({
+          userId: "me",
+          id: m.id,
+          format: "metadata",
+          metadataHeaders: ["From", "Subject", "Date"]
+        });
+
+        const headers = full.data.payload?.headers || [];
+        const from = getHeader(headers, "From");
+        const subject = getHeader(headers, "Subject") || "(No Subject)";
+        const date = getHeader(headers, "Date");
+        return {
+          id: full.data.id,
+          from,
+          subject,
+          date,
+          snippet: (full.data.snippet || "").replace(/\s+/g, " ").trim()
+        };
+      })
+    );
+
+    const topicLC = catchupTopic.toLowerCase();
+    const keywordLC = gmailLabel.toLowerCase();
+    const filtered = detailedMessages
+      .filter((m) => {
+        const hay = `${m.subject} ${m.snippet} ${m.from}`.toLowerCase();
+        return hay.includes(topicLC) || hay.includes(keywordLC);
+      })
+      .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+
+    if (filtered.length === 0) {
+      return res.json({
+        success: true,
+        fetchedCount: detailedMessages.length,
+        matchedCount: 0,
+        summary: `Fetched ${detailedMessages.length} emails (query: ${usedQuery || "fallback"}), but none were clearly related to \"${catchupTopic}\" or \"${gmailLabel}\".`
+      });
+    }
+
+    const digestLines = filtered.slice(0, 12).map((m, idx) => (
+      `${idx + 1}. From: ${m.from}\nSubject: ${m.subject}\nDate: ${m.date}\nSnippet: ${m.snippet}`
+    )).join("\n\n");
+
+    let summary;
+    try {
+      const aiResponse = await generateText({
+        model: openai("gpt-4o-mini"),
+        maxTokens: 500,
+        prompt: `You are an email ops assistant. Create a concise catch-up summary from recent Gmail messages.
+      Topic to track: ${catchupTopic}
+      Gmail label: ${gmailLabel}
+
+Emails:\n${digestLines}
+
+Output format:
+1) Top Updates (5 bullets max)
+2) Action Items (3 bullets max)
+3) Follow-up Priority (High/Medium/Low list)`
+      });
+      summary = aiResponse.text;
+    } catch (aiErr) {
+      console.error("[Gmail Catch-up] AI summarization failed:", aiErr.message);
+      summary = [
+        `Gmail catch-up for topic \"${catchupTopic}\" in label \"${gmailLabel}\":`,
+        ...filtered.slice(0, 8).map((m) => `- ${m.subject} (${m.from})`)
+      ].join("\n");
+    }
+
+    res.json({
+      success: true,
+      usedQuery,
+      fetchedCount: detailedMessages.length,
+      matchedCount: filtered.length,
+      summary,
+      emails: filtered.slice(0, 5)
+    });
+  } catch (err) {
+    console.error("[Gmail Catch-up Error]:", err.message);
+    if (err.response?.status === 401) {
+      return res.status(401).json({ error: "Gmail session expired. Please reconnect Gmail." });
+    }
+    res.status(500).json({
+      error: "Failed to fetch Gmail catch-up",
+      details: err.message
     });
   }
 });

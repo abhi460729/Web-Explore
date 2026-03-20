@@ -215,11 +215,12 @@ function App() {
       ]
     },
     {
-      title: "Email Follow-Up Automation",
-      slug: "email-followup",
-      promptTemplate: "When I get a customer reply to my outbound email in Gmail, automatically analyze it and handle the follow-up: if positive interest send calendar invite, if question answer it, if no interest mark as closed - Gmail",
+      title: "Catch me up on Enterprise or Individual",
+      slug: "gmail-catchup",
+      promptTemplate: "Connect Gmail, fetch recent emails in real time, and summarize key updates based on my topic and label.",
       fields: [
-        { key: "gmail_label", label: "Gmail Label to Monitor (optional)", placeholder: "e.g. Outbound Leads", required: false }
+        { key: "catchup_topic", label: "What do you want to track?", placeholder: "e.g. Passport", required: true },
+        { key: "gmail_label", label: "Gmail Label", placeholder: "e.g. Book Appointment", required: true }
       ]
     },
     {
@@ -313,6 +314,7 @@ function App() {
   useEffect(() => {
     const query = new URLSearchParams(location.search).get("query");
     const prefillFromState = location.state?.prefillPrompt;
+    const autoRunMode = location.state?.autoRunMode;
 
     if (id && query) {
       handleUrlSearch(query, id);
@@ -321,13 +323,17 @@ function App() {
       setResponse(null);
       setMode("search");
       setError("");
+
+      if (autoRunMode) {
+        handleSubmit(null, prefillFromState, autoRunMode);
+      }
     } else if (location.pathname === "/search") {
       setResponse(null);
       setPrompt("");
       setMode("search");
       setError("");
     }
-  }, [id, location.search, location.pathname, location.state?.prefillPrompt]);
+  }, [id, location.search, location.pathname, location.state?.prefillPrompt, location.state?.autoRunMode]);
 
   const toggleTheme = () => setTheme(theme === "light" ? "dark" : "light");
 
@@ -663,18 +669,19 @@ function App() {
     const handleGenerate = async () => {
         if (!isValid) return;
 
-      if (workflow.slug === "email-followup") {
+      if (workflow.slug === "gmail-catchup") {
 
       try {
 
-        const res = await fetch("/api/workflows/email-followup/start", {
+        const res = await fetch("/api/workflows/gmail-catchup/start", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "x-user-id": user?.id || ""
           },
           body: JSON.stringify({
-            gmail_label: values.gmail_label || null
+            gmail_label: values.gmail_label || null,
+            catchup_topic: values.catchup_topic || ""
           })
         });
 
@@ -685,9 +692,14 @@ function App() {
           return;
         }
 
-        alert("Email Follow-Up automation started successfully!");
+        alert("Gmail catch-up summary generated successfully!");
 
-        navigate("/search");
+        navigate("/search", {
+          state: {
+            prefillPrompt: data.summary || "Summarize my latest Gmail updates",
+            autoRunMode: "ai"
+          }
+        });
 
         } catch (err) {
           alert("Failed to start automation");
@@ -796,7 +808,7 @@ function App() {
 
                   {/* CONNECT BUTTONS */}
 
-                  {card.slug === "email-followup" && (
+                  {card.slug === "gmail-catchup" && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -808,7 +820,7 @@ function App() {
                           connectGoogleTool("gmail");
                         }
                       }}
-                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.gmail ? "bg-green-600 hover:bg-green-700" : "bg-red-500 hover:bg-red-600"}`}
+                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.gmail ? "bg-green-600 hover:bg-green-700" : "bg-gray-500 hover:bg-gray-600"}`}
                     >
                       {integrations.gmail ? "Connected ✓ (click to disconnect)" : "Connect Gmail"}
                     </button>
@@ -826,7 +838,7 @@ function App() {
                           connectGoogleTool("calendar");
                         }
                       }}
-                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.calendar ? "bg-green-600 hover:bg-green-700" : "bg-blue-500 hover:bg-blue-600"}`}
+                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.calendar ? "bg-green-600 hover:bg-green-700" : "bg-gray-500 hover:bg-gray-600"}`}
                     >
                       {integrations.calendar ? "Connected ✓ (click to disconnect)" : "Connect Calendar"}
                     </button>
@@ -844,7 +856,7 @@ function App() {
                           connectGoogleTool("docs");
                         }
                       }}
-                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.docs ? "bg-green-600 hover:bg-green-700" : "bg-purple-500 hover:bg-purple-600"}`}
+                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.docs ? "bg-green-600 hover:bg-green-700" : "bg-gray-500 hover:bg-gray-600"}`}
                     >
                       {integrations.docs ? "Connected ✓ (click to disconnect)" : "Connect Docs"}
                     </button>
@@ -862,7 +874,7 @@ function App() {
                           connectGoogleTool("sheets");
                         }
                       }}
-                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.sheets ? "bg-green-600 hover:bg-green-700" : "bg-green-500 hover:bg-green-600"}`}
+                      className={`mt-2 px-4 py-2 rounded-lg text-sm ${integrations.sheets ? "bg-green-600 hover:bg-green-700" : "bg-gray-500 hover:bg-gray-600"}`}
                     >
                       {integrations.sheets ? "Connected ✓ (click to disconnect)" : "Connect Sheets"}
                     </button>
