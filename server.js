@@ -1905,6 +1905,208 @@ app.post("/api/workflows/send-doc-emails/upload-start", upload.single("doc_file"
   }
 });
 
+app.post("/api/workflows/hr-ops/start", async (req, res) => {
+  const userId = req.headers["x-user-id"];
+  const recipientEmail = String(req.body?.email || "").trim();
+  const employeeName = String(req.body?.name || "").trim();
+  const companyEmail = String(req.body?.company_email || "").trim();
+  const securityCode = String(req.body?.security_code || "").trim();
+
+  if (!userId) {
+    return res.status(401).json({ error: "User not authenticated" });
+  }
+
+  if (!recipientEmail || !employeeName || !companyEmail) {
+    return res.status(400).json({
+      error: "email, name, and company_email are required"
+    });
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(recipientEmail)) {
+    return res.status(400).json({ error: "Invalid recipient email" });
+  }
+
+  if (!emailRegex.test(companyEmail)) {
+    return res.status(400).json({ error: "Invalid company email" });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { gmailTokens: true }
+    });
+
+    if (!user?.gmailTokens) {
+      return res.status(400).json({ error: "Please connect Gmail first" });
+    }
+
+    const gmailOAuth = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    gmailOAuth.setCredentials(user.gmailTokens);
+
+    const gmail = google.gmail({ version: "v1", auth: gmailOAuth });
+
+    const subject = `Welcome ${employeeName} | Office Credentials for ${companyEmail}`;
+    const lines = [
+      `Hi ${employeeName},`,
+      "",
+      `Your company email is ${companyEmail} and your security code is ${securityCode}. Please use these to set up your office credentials securely.`,
+      "",
+      "Regards,",
+      "HR Team"
+    ].filter(Boolean);
+
+    const mime = [
+      `To: ${recipientEmail}`,
+      `Subject: ${subject}`,
+      "MIME-Version: 1.0",
+      'Content-Type: text/plain; charset="UTF-8"',
+      "",
+      lines.join("\n")
+    ].join("\r\n");
+
+    const raw = Buffer.from(mime)
+      .toString("base64")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+
+    await gmail.users.messages.send({
+      userId: "me",
+      requestBody: { raw }
+    });
+
+    return res.json({
+      success: true,
+      sentTo: recipientEmail,
+      summary: `HR Ops email sent to ${recipientEmail} for ${employeeName} (${companyEmail}).`
+    });
+  } catch (err) {
+    console.error("[HR Ops Workflow Error]:", err.message);
+    return res.status(500).json({
+      error: "Failed to send HR Ops email",
+      details: err.message
+    });
+  }
+});
+
+app.post("/api/workflows/leadership-hr-handover/start", async (req, res) => {
+  const userId = req.headers["x-user-id"];
+  const employeeName = String(req.body?.employee_name || "").trim();
+  const employeeEmail = String(req.body?.employee_email || "").trim();
+  const roleTitle = String(req.body?.role_title || "").trim();
+  const immediateManager = String(req.body?.immediate_manager || "").trim();
+  const reportingManager = String(req.body?.reporting_manager || "").trim();
+  const startDate = String(req.body?.start_date || "").trim();
+  const employeeId = String(req.body?.employee_id || "").trim();
+  const companyEmail = String(req.body?.company_email || "").trim();
+  const securityCode = String(req.body?.security_code || "").trim();
+  const hrEmail = String(req.body?.hr_email || "").trim();
+
+  if (!userId) {
+    return res.status(401).json({ error: "User not authenticated" });
+  }
+
+  if (!employeeName || !employeeEmail || !roleTitle || !immediateManager || !reportingManager || !startDate || !employeeId || !companyEmail || !securityCode || !hrEmail) {
+    return res.status(400).json({
+      error: "All fields are required (employee_name, employee_email, role_title, immediate_manager, reporting_manager, start_date, employee_id, company_email, security_code, hr_email)"
+    });
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(employeeEmail)) {
+    return res.status(400).json({ error: "Invalid employee email" });
+  }
+
+  if (!emailRegex.test(companyEmail)) {
+    return res.status(400).json({ error: "Invalid company email" });
+  }
+
+  if (!emailRegex.test(hrEmail)) {
+    return res.status(400).json({ error: "Invalid HR email" });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { gmailTokens: true }
+    });
+
+    if (!user?.gmailTokens) {
+      return res.status(400).json({ error: "Please connect Gmail first" });
+    }
+
+    const gmailOAuth = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    gmailOAuth.setCredentials(user.gmailTokens);
+
+    const gmail = google.gmail({ version: "v1", auth: gmailOAuth });
+
+    const subject = `Leadership Handover Notice | ${employeeName} - ${roleTitle}`;
+    const lines = [
+      `Dear ${employeeName},`,
+      "",
+      `We are pleased to inform you about your onboarding with the organization. Below is your leadership handover document:`,
+      "",
+      `Employee Name: ${employeeName}`,
+      `Employee ID: ${employeeId}`,
+      `Role: ${roleTitle}`,
+      `Immediate Manager: ${immediateManager}`,
+      `Reporting Manager: ${reportingManager}`,
+      `Company Email: ${companyEmail}`,
+      `Security Code: ${securityCode}`,
+      `Start Date: ${startDate}`,
+      `HR Contact: ${hrEmail}`,
+      "",
+      `Your immediate manager will guide you through the onboarding process. Please reach out to the HR team at ${hrEmail} for any questions regarding access, credentials setup, and organizational policies.`,
+      "",
+      `Note: For security purposes, keep your security code confidential. Never share your login credentials with anyone.`,
+      "",
+      "Best Regards,",
+      "Leadership Team"
+    ].filter(Boolean);
+
+    const mime = [
+      `To: ${employeeEmail}`,
+      `Subject: ${subject}`,
+      "MIME-Version: 1.0",
+      'Content-Type: text/plain; charset="UTF-8"',
+      "",
+      lines.join("\n")
+    ].join("\r\n");
+
+    const raw = Buffer.from(mime)
+      .toString("base64")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+
+    await gmail.users.messages.send({
+      userId: "me",
+      requestBody: { raw }
+    });
+
+    return res.json({
+      success: true,
+      sentTo: employeeEmail,
+      summary: `Leadership to HR Handover email sent to ${employeeName} (${employeeEmail}) for role ${roleTitle}.`
+    });
+  } catch (err) {
+    console.error("[Leadership HR Handover Workflow Error]:", err.message);
+    return res.status(500).json({
+      error: "Failed to send Leadership HR Handover email",
+      details: err.message
+    });
+  }
+});
+
 app.post("/api/workflows/study-plan/start", async (req, res) => {
   const userId = req.headers["x-user-id"];
   const topic = String(req.body?.topic || "").trim();

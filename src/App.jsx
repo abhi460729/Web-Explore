@@ -69,6 +69,7 @@ function App() {
   const [attachedDocFile, setAttachedDocFile] = useState(null);
   const [isExecutingWorkflow, setIsExecutingWorkflow] = useState(false);
   const [activeEmbedSlug, setActiveEmbedSlug] = useState("");
+  const [activeWorkflowTab, setActiveWorkflowTab] = useState("All");
   const [integrations, setIntegrations] = useState({
     gmail: false,
     calendar: false,
@@ -106,6 +107,7 @@ function App() {
     {
       title: "Alumni Details",
       slug: "alumni-details",
+      category: "Research & Intelligence",
       promptTemplate: "help me find 10 people who went to {{school}} in the last few years who now work at {{company}}",
       videoSrc: "",
       fields: [
@@ -116,6 +118,7 @@ function App() {
     {
       title: "YC Company Founders Details",
       slug: "yc-company-founders",
+      category: "Research & Intelligence",
       promptTemplate: "do a deep dive on founders of YC company: {{company}}",
       fields: [
         { key: "company", label: "Company Name", placeholder: "e.g. Stripe, Brex, OpenAI", required: true }
@@ -124,6 +127,7 @@ function App() {
     {
       title: "Antler Company Founder Details",
       slug: "antler-company-founder",
+      category: "Research & Intelligence",
       promptTemplate: "do a deep dive on founders of Antler company: {{company}}",
       fields: [
         { key: "company", label: "Company Name", placeholder: "e.g. Xalts, Razorpay", required: true }
@@ -132,6 +136,7 @@ function App() {
     {
       title: "YC Company Details",
       slug: "yc-company-details",
+      category: "Research & Intelligence",
       promptTemplate: "Tell me about what this YC company called {{company}} does",
       fields: [
         { key: "company", label: "Company Name", placeholder: "e.g. Stripe, Airbnb, Cred", required: true }
@@ -140,6 +145,7 @@ function App() {
     {
       title: "Antler Company Details",
       slug: "antler-company-details",
+      category: "Research & Intelligence",
       promptTemplate: "Tell me about what this Antler company called {{company}} does",
       fields: [
         { key: "company", label: "Company Name", placeholder: "e.g. Razorpay, Cred", required: true }
@@ -148,6 +154,7 @@ function App() {
     {
       title: "LinkedIn Viral Post Research",
       slug: "linkedin-viral-post",
+      category: "Research & Intelligence",
       promptTemplate: "Tell a viral post by {{person name}} on LinkedIn",
       fields: [
         { key: "person name", label: "Person Name", placeholder: "e.g. Ankur Warikoo, Shradha Sharma", required: true }
@@ -156,6 +163,7 @@ function App() {
     {
       title: "Reddit Viral Post Research",
       slug: "reddit-viral-post",
+      category: "Research & Intelligence",
       promptTemplate: "Tell me about a viral post on Reddit about {{person name}}",
       fields: [
         { key: "person name", label: "Person Name", placeholder: "e.g. Naval Ravikant, Lex Fridman", required: true }
@@ -164,14 +172,46 @@ function App() {
     {
       title: "Email Draft",
       slug: "email-draft",
+      category: "Communication",
       promptTemplate: "Draft me a email for {{subject}}",
       fields: [
         { key: "subject", label: "Email Subject / Purpose", placeholder: "e.g. job application follow-up, meeting request", required: true }
       ]
     },
     {
+      title: "HR Ops - Onboarding Email",
+      slug: "hr-ops",
+      category: "HR Automation",
+      promptTemplate: "Draft an HR onboarding email to {{email}} for {{name}} using company email {{company_email}} and security code {{security_code}}.",
+      fields: [
+        { key: "email", label: "Recipient Email", placeholder: "e.g. employee.personal@email.com", required: true },
+        { key: "name", label: "Employee Name", placeholder: "e.g. Priya Sharma", required: true },
+        { key: "company_email", label: "Company Email", placeholder: "e.g. priya.sharma@company.com", required: true },
+        { key: "security_code", label: "Security Code", placeholder: "e.g. 123456", required: true }
+      ]
+    },
+    {
+      title: "Leadership to HR Handover",
+      slug: "leadership-hr-handover",
+      category: "HR Automation",
+      promptTemplate: "Draft a leadership-to-HR onboarding handover note for {{employee_name}} ({{employee_email}}), role {{role_title}}, immediate manager {{immediate_manager}}, reporting manager {{reporting_manager}}, start date {{start_date}}, employee ID {{employee_id}}, company email {{company_email}}, and security code {{security_code}}.",
+      fields: [
+        { key: "employee_name", label: "Employee Name", placeholder: "e.g. Rohan Mehta", required: true },
+        { key: "employee_email", label: "Employee Personal Email", placeholder: "e.g. rohan.mehta@email.com", required: true },
+        { key: "role_title", label: "Role Title", placeholder: "e.g. Product Analyst", required: true },
+        { key: "immediate_manager", label: "Immediate Manager", placeholder: "e.g. Anita Sharma", required: true },
+        { key: "reporting_manager", label: "Reporting Manager", placeholder: "e.g. Vikram Singh", required: true },
+        { key: "start_date", label: "Start Date", placeholder: "e.g. 2026-04-01", required: true },
+        { key: "employee_id", label: "Employee ID", placeholder: "e.g. EMP-12345", required: true },
+        { key: "company_email", label: "Company Email", placeholder: "e.g. rohan.mehta@company.com", required: true },
+        { key: "security_code", label: "Security Code", placeholder: "e.g. 123456", required: true },
+        { key: "hr_email", label: "HR Email", placeholder: "e.g. hr@company.com", required: true }
+      ]
+    },
+    {
       title: "College Comparison",
       slug: "college-comparison",
+      category: "Learning & Education",
       promptTemplate: "Compare colleges {{college 1}} and {{college 2}} and tell me which is overall better",
       fields: [
         { key: "college 1", label: "College 1", placeholder: "e.g. IIT Bombay, NIT Trichy", required: true },
@@ -181,6 +221,7 @@ function App() {
     {
       title: "Country Comparison to Settle",
       slug: "country-comparison",
+      category: "General Lookup",
       promptTemplate: "Country comparison to settle between {{country 1}} and {{country 2}}",
       fields: [
         { key: "country 1", label: "Country 1", placeholder: "e.g. Canada, Australia", required: true },
@@ -190,6 +231,7 @@ function App() {
     {
       title: "University Comparison Abroad",
       slug: "university-comparison",
+      category: "Learning & Education",
       promptTemplate: "Comparison between universities abroad: Compare university {{university 1}} and {{university 2}} and tell me which is overall better",
       fields: [
         { key: "university 1", label: "University 1", placeholder: "e.g. MIT, Stanford", required: true },
@@ -199,6 +241,7 @@ function App() {
     {
       title: "Best Faculties at College",
       slug: "best-faculties-college",
+      category: "Learning & Education",
       promptTemplate: "Some of the best faculties at {{college name}} in {{department}} at {{campus}}",
       fields: [
         { key: "college name", label: "College Name", placeholder: "e.g. IIT Kanpur", required: true },
@@ -209,6 +252,7 @@ function App() {
     {
       title: "Best Faculties at School",
       slug: "best-faculties-school",
+      category: "Learning & Education",
       promptTemplate: "Some of the best faculties at {{school}} in {{city}} for {{subject}}",
       fields: [
         { key: "school", label: "School Name", placeholder: "e.g. DPS RK Puram", required: true },
@@ -219,6 +263,7 @@ function App() {
     {
       title: "Best Coaching Institutes",
       slug: "best-coaching",
+      category: "Learning & Education",
       promptTemplate: "Best coaching institutes to prepare for {{exam}}",
       fields: [
         { key: "exam", label: "Exam Name", placeholder: "e.g. JEE Advanced, NEET, UPSC", required: true }
@@ -227,6 +272,7 @@ function App() {
     {
       title: "Best Restaurant in City",
       slug: "best-restaurant",
+      category: "General Lookup",
       promptTemplate: "Best restaurant in city {{city}}",
       fields: [
         { key: "city", label: "City Name", placeholder: "e.g. Mumbai, Bangalore, Ahmedabad", required: true }
@@ -235,6 +281,7 @@ function App() {
     {
       title: "Catch me up on Enterprise or Individual communications",
       slug: "gmail-catchup",
+      category: "Communication",
       promptTemplate: "Connect Gmail, fetch recent emails in real time, and summarize key updates based on my topic and label",
       embedUrl: "https://youtu.be/GqurWrKfpic",
       fields: [
@@ -246,6 +293,7 @@ function App() {
     {
       title: "Catch me up on Enterprise or Individual meetings and tasks",
       slug: "project-reminders",
+      category: "Communication",
       promptTemplate: "Connect Google Calendar, fetch meetings and tasks in real time, and summarize key updates",
       embedUrl: "https://youtu.be/iyejLV7W3SY",
       fields: [
@@ -257,6 +305,7 @@ function App() {
     {
       title: "Research Competitors",
       slug: "research-competitors",
+      category: "Sales & Business",
       promptTemplate: "Research my main competitors {{competitor names}} and create a detailed Google Doc report with their strengths, weaknesses, pricing, recent news and possible future plans",
       embedUrl: "https://youtu.be/iyejLV7W3SY",
       fields: [
@@ -266,6 +315,7 @@ function App() {
     {
       title: "Personalized Pitch Emails",
       slug: "pitch-emails",
+      category: "Sales & Business",
       promptTemplate: "I have a Google Sheet with potential investors (columns: Name, Email, Focus Areas). Draft personalized cold pitch emails for each one highlighting why my startup fits their investment thesis and save all drafts in Google Docs.",
       embedUrl: "https://youtu.be/kh2_4JGzMdo",
       fields: [
@@ -276,6 +326,7 @@ function App() {
     {
       title: "Send Pitch Emails from Google Docs",
       slug: "send-doc-emails",
+      category: "Sales & Business",
       promptTemplate: "Attach a Google Doc containing pitch email drafts and send those emails directly via Gmail.",
       embedUrl: "https://youtu.be/3BIHszVxZXc",
       fields: [
@@ -287,6 +338,7 @@ function App() {
     {
       title: "Learning Roadmap",
       slug: "study-plan",
+      category: "Learning & Education",
       promptTemplate: "Create a study roadmap in Google Docs, generate practice questions in Google Sheets, and send recurring progress emails via Gmail.",
       embedUrl: "https://youtu.be/7w4XpQjRx58",
       fields: [
@@ -813,6 +865,8 @@ function App() {
       "gmail-catchup",
       "project-reminders",
       "research-competitors",
+      "hr-ops",
+      "leadership-hr-handover",
       "pitch-emails",
       "send-doc-emails",
       "study-plan"
@@ -1156,6 +1210,94 @@ function App() {
         return;
       }
 
+      if (workflow.slug === "hr-ops") {
+        if (!isUltraUser) {
+          navigate("/pricing");
+          return;
+        }
+
+        try {
+          const res = await fetch("/api/workflows/hr-ops/start", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-user-id": user?.id || ""
+            },
+            body: JSON.stringify({
+              email: values.email || "",
+              name: values.name || "",
+              company_email: values.company_email || "",
+              security_code: values.security_code || ""
+            })
+          });
+
+          const data = await res.json();
+
+          if (!res.ok) {
+            console.error(data.error || "Failed to start HR Ops workflow");
+            return;
+          }
+
+          navigate("/search", {
+            state: {
+              prefillPrompt: data.summary || "Summarize my HR onboarding email activity",
+              autoRunMode: "ai"
+            }
+          });
+        } catch (err) {
+          console.error("Failed to start HR Ops automation", err);
+        }
+
+        return;
+      }
+
+      if (workflow.slug === "leadership-hr-handover") {
+        if (!isUltraUser) {
+          navigate("/pricing");
+          return;
+        }
+
+        try {
+          const res = await fetch("/api/workflows/leadership-hr-handover/start", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-user-id": user?.id || ""
+            },
+            body: JSON.stringify({
+              employee_name: values.employee_name || "",
+              employee_email: values.employee_email || "",
+              role_title: values.role_title || "",
+              immediate_manager: values.immediate_manager || "",
+              reporting_manager: values.reporting_manager || "",
+              start_date: values.start_date || "",
+              employee_id: values.employee_id || "",
+              company_email: values.company_email || "",
+              security_code: values.security_code || "",
+              hr_email: values.hr_email || ""
+            })
+          });
+
+          const data = await res.json();
+
+          if (!res.ok) {
+            console.error(data.error || "Failed to start Leadership HR Handover workflow");
+            return;
+          }
+
+          navigate("/search", {
+            state: {
+              prefillPrompt: data.summary || "Summarize my leadership to HR handover activity",
+              autoRunMode: "ai"
+            }
+          });
+        } catch (err) {
+          console.error("Failed to start Leadership HR Handover automation", err);
+        }
+
+        return;
+      }
+
 
       let finalPrompt = workflow.promptTemplate;
       Object.entries(values).forEach(([k, v]) => {
@@ -1377,6 +1519,72 @@ function App() {
               </div>
             )}
 
+            {workflow.slug === "hr-ops" && (
+              <div className="mt-6 rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-4">
+                <div className="flex flex-wrap gap-3 mb-3">
+                  {!isUltraUser ? (
+                    <button
+                      type="button"
+                      onClick={handleUpgradePlanClick}
+                      className="px-4 py-2 rounded-xl text-sm font-medium bg-gray-500 hover:bg-gray-600 text-white transition"
+                    >
+                      Upgrade Plan
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => integrations.gmail ? disconnectGoogleTool("gmail") : connectGoogleTool("gmail")}
+                      className={`px-4 py-2 rounded-xl text-sm font-medium transition ${
+                        integrations.gmail
+                          ? "bg-gray-700 text-white hover:bg-gray-800"
+                          : "bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200"
+                      }`}
+                    >
+                      {integrations.gmail ? "Gmail Connected ✓" : "Connect Gmail"}
+                    </button>
+                  )}
+                </div>
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                  {!isUltraUser
+                    ? "HR Ops is available on the ULTRA plan. Upgrade to continue."
+                    : "HR Ops execute flow sends the onboarding email through your connected Gmail account."}
+                </p>
+              </div>
+            )}
+
+            {workflow.slug === "leadership-hr-handover" && (
+              <div className="mt-6 rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-4">
+                <div className="flex flex-wrap gap-3 mb-3">
+                  {!isUltraUser ? (
+                    <button
+                      type="button"
+                      onClick={handleUpgradePlanClick}
+                      className="px-4 py-2 rounded-xl text-sm font-medium bg-gray-500 hover:bg-gray-600 text-white transition"
+                    >
+                      Upgrade Plan
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => integrations.gmail ? disconnectGoogleTool("gmail") : connectGoogleTool("gmail")}
+                      className={`px-4 py-2 rounded-xl text-sm font-medium transition ${
+                        integrations.gmail
+                          ? "bg-gray-700 text-white hover:bg-gray-800"
+                          : "bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200"
+                      }`}
+                    >
+                      {integrations.gmail ? "Gmail Connected ✓" : "Connect Gmail"}
+                    </button>
+                  )}
+                </div>
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                  {!isUltraUser
+                    ? "Leadership to HR Handover is available on the ULTRA plan. Upgrade to continue."
+                    : "Leadership to HR Handover execute flow sends the handover note through your connected Gmail account to the employee."}
+                </p>
+              </div>
+            )}
+
             <button
               type="button"
               onClick={handleGenerate}
@@ -1478,8 +1686,27 @@ function App() {
             and press Enter.
           </p>
 
+          {/* CATEGORY TABS */}
+          <div className="flex flex-wrap justify-center gap-2 mb-8">
+            {["All", "HR Automation", "Sales & Business", "Research & Intelligence", "Communication", "Learning & Education", "General Lookup"].map((category) => (
+              <button
+                key={category}
+                onClick={() => setActiveWorkflowTab(category)}
+                className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
+                  activeWorkflowTab === category
+                    ? "bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900"
+                    : "bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 hover:bg-gray-300 dark:hover:bg-gray-600"
+                }`}
+              >
+                {category}
+              </button>
+            ))}
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
-            {workflowCards.map((card, index) => (
+            {workflowCards
+              .filter((card) => activeWorkflowTab === "All" || card.category === activeWorkflowTab)
+              .map((card, index) => (
                 <div
                   key={index}
                   onClick={() => navigate(`/workflow-input/${card.slug}`)}
@@ -1668,6 +1895,64 @@ function App() {
                           {integrations.docs ? "Docs Connected ✓ (click to disconnect)" : "Connect Docs"}
                         </button>
                       </>
+                    )
+                  )}
+
+                  {card.slug === "hr-ops" && (
+                    !isUltraUser ? (
+                      <button
+                        onClick={handleUpgradePlanClick}
+                        className="mt-2 px-4 py-2 rounded-lg text-sm bg-gray-500 hover:bg-gray-600 text-white cursor-pointer transition block mx-auto"
+                      >
+                        Upgrade Plan
+                      </button>
+                    ) : (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (integrations.gmail) {
+                            disconnectGoogleTool("gmail");
+                          } else {
+                            connectGoogleTool("gmail");
+                          }
+                        }}
+                        className={`mt-2 px-4 py-2 rounded-lg text-sm cursor-pointer transition ${
+                          integrations.gmail
+                            ? "bg-gray-600 hover:bg-gray-700"
+                            : "bg-gray-500 hover:bg-gray-600"
+                        }`}
+                      >
+                        {integrations.gmail ? "Gmail Connected ✓ (click to disconnect)" : "Connect Gmail"}
+                      </button>
+                    )
+                  )}
+
+                  {card.slug === "leadership-hr-handover" && (
+                    !isUltraUser ? (
+                      <button
+                        onClick={handleUpgradePlanClick}
+                        className="mt-2 px-4 py-2 rounded-lg text-sm bg-gray-500 hover:bg-gray-600 text-white cursor-pointer transition block mx-auto"
+                      >
+                        Upgrade Plan
+                      </button>
+                    ) : (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (integrations.gmail) {
+                            disconnectGoogleTool("gmail");
+                          } else {
+                            connectGoogleTool("gmail");
+                          }
+                        }}
+                        className={`mt-2 px-4 py-2 rounded-lg text-sm cursor-pointer transition ${
+                          integrations.gmail
+                            ? "bg-gray-600 hover:bg-gray-700"
+                            : "bg-gray-500 hover:bg-gray-600"
+                        }`}
+                      >
+                        {integrations.gmail ? "Gmail Connected ✓ (click to disconnect)" : "Connect Gmail"}
+                      </button>
                     )
                   )}
 
