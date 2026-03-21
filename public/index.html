@@ -160,6 +160,157 @@
       font-size: 0.92rem;
     }
 
+    .video-section {
+      margin-top: 4rem;
+      margin-bottom: 3rem;
+    }
+
+    .video-container {
+      position: relative;
+      max-width: 800px;
+      margin: 2.5rem auto 0;
+      aspect-ratio: 16 / 9;
+      overflow: hidden;
+      border-radius: 1.5rem;
+      border: 1px solid var(--border);
+      background: #000;
+      box-shadow: var(--shadow-md);
+    }
+
+    .video-thumbnail {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: linear-gradient(to bottom right, #1e293b, #0f172a);
+      cursor: pointer;
+      display: block;
+      border: none;
+      padding: 0;
+      margin: 0;
+      z-index: 1;
+    }
+
+    .video-thumbnail:hover .play-button {
+      transform: scale(1.1);
+    }
+
+    .video-inner {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    .video-overlay {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 18% 20%, rgba(56,189,248,0.28), transparent 34%), radial-gradient(circle at 84% 78%, rgba(52,211,153,0.24), transparent 36%);
+    }
+
+    .video-overlay-dark {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(to top, rgba(0,0,0,0.7), rgba(0,0,0,0.25), rgba(0,0,0,0.15));
+    }
+
+    .play-button {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: transform 0.2s ease;
+    }
+
+    .play-button-circle {
+      width: 80px;
+      height: 80px;
+      background: rgba(255,255,255,0.95);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+    }
+
+    .play-icon {
+      width: 0;
+      height: 0;
+      border-style: solid;
+      border-width: 12px 0 12px 20px;
+      border-color: transparent transparent transparent #111;
+      margin-left: 4px;
+    }
+
+    .video-badge {
+      position: absolute;
+      left: 20px;
+      top: 20px;
+      background: rgba(255,255,255,0.2);
+      padding: 0.5rem 1rem;
+      border-radius: 2rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: white;
+      backdrop-filter: blur(10px);
+      z-index: 2;
+    }
+
+    .video-cta {
+      position: absolute;
+      left: 20px;
+      bottom: 20px;
+      background: rgba(0,0,0,0.7);
+      padding: 0.5rem 1rem;
+      border-radius: 2rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: white;
+      z-index: 2;
+    }
+
+    .close-button {
+      position: absolute;
+      right: 12px;
+      top: 12px;
+      background: rgba(0,0,0,0.65);
+      border: none;
+      color: white;
+      padding: 0.5rem 1rem;
+      border-radius: 2rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+      z-index: 10;
+      transition: background 0.2s ease;
+    }
+
+    .close-button:hover {
+      background: rgba(0,0,0,0.8);
+    }
+
+    .video-iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: block;
+    }
+
+    #videoPlayer {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 10;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
     @media (max-width: 640px) {
       .container {
         padding: 3rem 1.25rem 5rem;
@@ -255,6 +406,34 @@
       </div>
     </div>
 
+    <div class="video-section">
+      <div class="video-container">
+        <button class="video-thumbnail" id="videoThumbnail" aria-label="Play Web Explore AI walkthrough">
+          <div class="video-inner">
+            <div class="video-overlay"></div>
+            <div class="video-overlay-dark"></div>
+            <div class="play-button">
+              <div class="play-button-circle">
+                <div class="play-icon"></div>
+              </div>
+            </div>
+            <div class="video-badge">Web Explore AI Walkthrough</div>
+            <div class="video-cta">Watch walkthrough</div>
+          </div>
+        </button>
+        <div class="video-inner hidden" id="videoPlayer">
+          <button class="close-button" id="closeVideo">Close video</button>
+          <iframe
+            class="video-iframe"
+            src="https://www.youtube-nocookie.com/embed/S2UTPoaDKX0?autoplay=1&rel=0&modestbranding=1&iv_load_policy=3&playsinline=1"
+            title="Web Explore AI homepage walkthrough"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            referrerpolicy="strict-origin-when-cross-origin"
+          ></iframe>
+        </div>
+      </div>
+    </div>
+
     <footer>
       © 2026 Explore — Made with curiosity
     </footer>
@@ -307,5 +486,20 @@
       }
     }, 5000);
   </script>
-</body>
+
+  <script>
+    const videoThumbnail = document.getElementById('videoThumbnail');
+    const videoPlayer = document.getElementById('videoPlayer');
+    const closeButton = document.getElementById('closeVideo');
+
+    videoThumbnail.addEventListener('click', () => {
+      videoThumbnail.classList.add('hidden');
+      videoPlayer.classList.remove('hidden');
+    });
+
+    closeButton.addEventListener('click', () => {
+      videoPlayer.classList.add('hidden');
+      videoThumbnail.classList.remove('hidden');
+    });
+  </script>
 </html>

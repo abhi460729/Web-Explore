@@ -68,6 +68,7 @@ function App() {
   const [attachedInvestorFile, setAttachedInvestorFile] = useState(null);
   const [attachedDocFile, setAttachedDocFile] = useState(null);
   const [isExecutingWorkflow, setIsExecutingWorkflow] = useState(false);
+  const [activeEmbedSlug, setActiveEmbedSlug] = useState("");
   const [integrations, setIntegrations] = useState({
     gmail: false,
     calendar: false,
@@ -106,6 +107,7 @@ function App() {
       title: "Alumni Details",
       slug: "alumni-details",
       promptTemplate: "help me find 10 people who went to {{school}} in the last few years who now work at {{company}}",
+      videoSrc: "",
       fields: [
         { key: "school", label: "School / University", placeholder: "e.g. IIT Bombay, Stanford", required: true },
         { key: "company", label: "Target Company", placeholder: "e.g. Google, Cred", required: true }
@@ -234,6 +236,7 @@ function App() {
       title: "Catch me up on Enterprise or Individual communications",
       slug: "gmail-catchup",
       promptTemplate: "Connect Gmail, fetch recent emails in real time, and summarize key updates based on my topic and label",
+      embedUrl: "https://youtu.be/GqurWrKfpic",
       fields: [
         { key: "catchup_topic", label: "What do you want to track?", placeholder: "e.g. Passport", required: true },
         { key: "gmail_label", label: "Gmail Label", placeholder: "e.g. Book Appointment", required: true },
@@ -393,6 +396,10 @@ function App() {
     }
   }, [id, location.search, location.pathname, location.state?.prefillPrompt, location.state?.autoRunMode]);
 
+  useEffect(() => {
+    setActiveEmbedSlug("");
+  }, [location.pathname]);
+
   const toggleTheme = () => setTheme(theme === "light" ? "dark" : "light");
 
   const toggleModelDropdown = () => setIsModelDropdownOpen(!isModelDropdownOpen);
@@ -404,6 +411,20 @@ function App() {
 
   const generateQuerySlug = (query) =>
     query.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 50);
+
+  const extractYouTubeId = (url = "") => {
+    const trimmedUrl = url.trim();
+    const shortMatch = trimmedUrl.match(/youtu\.be\/([a-zA-Z0-9_-]{6,})/);
+    if (shortMatch?.[1]) return shortMatch[1];
+
+    const embedMatch = trimmedUrl.match(/youtube(?:-nocookie)?\.com\/embed\/([a-zA-Z0-9_-]{6,})/);
+    if (embedMatch?.[1]) return embedMatch[1];
+
+    const watchMatch = trimmedUrl.match(/[?&]v=([a-zA-Z0-9_-]{6,})/);
+    if (watchMatch?.[1]) return watchMatch[1];
+
+    return "";
+  };
 
   const debouncedSetPrompt = useCallback(debounce((value) => setPrompt(value), 300), []);
 
@@ -743,6 +764,10 @@ function App() {
   if (location.pathname.startsWith("/workflow-input/")) {
     const slug = location.pathname.replace("/workflow-input/", "");
     const workflow = workflowCards.find((w) => w.slug === slug);
+    const youtubeId = extractYouTubeId(workflow?.embedUrl || "");
+    const youtubeEmbedUrl = youtubeId
+      ? `https://www.youtube-nocookie.com/embed/${youtubeId}?autoplay=1&rel=0&modestbranding=1&iv_load_policy=3&playsinline=1`
+      : "";
 
     if (!workflow) {
       return (
@@ -1244,6 +1269,64 @@ function App() {
                 </span>
               ) : isIntegrationWorkflow ? "Execute Task" : "Generate Query & Go to Search →"}
             </button>
+
+            {(workflow.embedUrl || workflow.videoSrc) && (
+              <div className="mt-8 overflow-hidden rounded-2xl border border-gray-200 dark:border-gray-700 bg-black shadow-sm">
+                {workflow.embedUrl ? (
+                  youtubeId && activeEmbedSlug !== workflow.slug ? (
+                    <button
+                      type="button"
+                      onClick={() => setActiveEmbedSlug(workflow.slug)}
+                      className="group relative block w-full text-left bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900"
+                      aria-label={`Play ${workflow.title} video walkthrough`}
+                    >
+                      <div className="relative w-full" style={{ paddingTop: "56.25%" }}>
+                        <span className="absolute inset-0 bg-[radial-gradient(circle_at_18%_20%,rgba(56,189,248,0.28),transparent_34%),radial-gradient(circle_at_84%_78%,rgba(52,211,153,0.24),transparent_36%)]" aria-hidden="true" />
+                        <span className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/25 to-black/15" aria-hidden="true" />
+                        <span className="absolute inset-0 flex items-center justify-center" aria-hidden="true">
+                        <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/95 shadow-xl transition-transform duration-200 group-hover:scale-105">
+                          <span className="ml-1 h-0 w-0 border-y-[10px] border-y-transparent border-l-[16px] border-l-gray-900" />
+                        </span>
+                        </span>
+                        <span className="absolute left-4 top-4 rounded-full bg-white/20 px-3 py-1 text-xs font-semibold text-white backdrop-blur-sm">
+                          Web Explore AI Walkthrough
+                        </span>
+                        <span className="absolute bottom-4 left-4 rounded-full bg-black/70 px-3 py-1 text-xs font-semibold text-white">
+                          Watch walkthrough
+                        </span>
+                      </div>
+                    </button>
+                  ) : (
+                    <div className="relative w-full" style={{ paddingTop: "56.25%" }}>
+                      <button
+                        type="button"
+                        onClick={() => setActiveEmbedSlug("")}
+                        className="absolute right-3 top-3 z-10 rounded-full bg-black/65 px-3 py-1 text-xs font-semibold text-white backdrop-blur-sm hover:bg-black/80"
+                      >
+                        Close video
+                      </button>
+                      <iframe
+                        className="absolute inset-0 h-full w-full"
+                        src={youtubeId ? youtubeEmbedUrl : workflow.embedUrl}
+                        title={`${workflow.title} video walkthrough`}
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                        referrerPolicy="strict-origin-when-cross-origin"
+                      />
+                    </div>
+                  )
+                ) : (
+                  <video
+                    className="block w-full h-auto max-h-[420px]"
+                    controls
+                    preload="metadata"
+                    playsInline
+                  >
+                    <source src={workflow.videoSrc} type="video/mp4" />
+                    Your browser does not support the video tag.
+                  </video>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1765,12 +1848,65 @@ function App() {
   }
 
   if (location.pathname === "/") {
+    const homeVideoUrl = "https://youtu.be/HsMu7b73O4Y";
+    const homeYoutubeId = extractYouTubeId(homeVideoUrl);
+    const homeYoutubeEmbedUrl = homeYoutubeId
+      ? `https://www.youtube-nocookie.com/embed/${homeYoutubeId}?autoplay=1&rel=0&modestbranding=1&iv_load_policy=3&playsinline=1`
+      : homeVideoUrl;
+
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50 dark:bg-gray-900 p-6">
         <h1 className={`${doodle.className} text-6xl sm:text-8xl mb-6`}>{doodle.text}</h1>
         <p className="text-xl sm:text-2xl text-gray-600 dark:text-gray-300 mb-10 text-center max-w-2xl">
           Discover Answers with Web Explore – Ask anything, get instant results
         </p>
+
+        {homeYoutubeId && (
+          <div className="mb-10 w-full max-w-4xl overflow-hidden rounded-3xl border border-gray-200 bg-black shadow-xl dark:border-gray-700">
+            {activeEmbedSlug !== "home-hero" ? (
+              <button
+                type="button"
+                onClick={() => setActiveEmbedSlug("home-hero")}
+                className="group relative block w-full text-left bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900"
+                aria-label="Play Web Explore AI walkthrough"
+              >
+                <div className="relative w-full" style={{ paddingTop: "56.25%" }}>
+                  <span className="absolute inset-0 bg-[radial-gradient(circle_at_18%_20%,rgba(56,189,248,0.28),transparent_34%),radial-gradient(circle_at_84%_78%,rgba(52,211,153,0.24),transparent_36%)]" aria-hidden="true" />
+                  <span className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/25 to-black/15" aria-hidden="true" />
+                  <span className="absolute inset-0 flex items-center justify-center" aria-hidden="true">
+                    <span className="flex h-20 w-20 items-center justify-center rounded-full bg-white/95 shadow-xl transition-transform duration-200 group-hover:scale-105">
+                      <span className="ml-1 h-0 w-0 border-y-[12px] border-y-transparent border-l-[18px] border-l-gray-900" />
+                    </span>
+                  </span>
+                  <span className="absolute left-5 top-5 rounded-full bg-white/20 px-3 py-1 text-xs font-semibold text-white backdrop-blur-sm">
+                    Web Explore AI Walkthrough
+                  </span>
+                  <span className="absolute bottom-5 left-5 rounded-full bg-black/70 px-3 py-1 text-xs font-semibold text-white">
+                    Watch walkthrough
+                  </span>
+                </div>
+              </button>
+            ) : (
+              <div className="relative w-full" style={{ paddingTop: "56.25%" }}>
+                <button
+                  type="button"
+                  onClick={() => setActiveEmbedSlug("")}
+                  className="absolute right-3 top-3 z-10 rounded-full bg-black/65 px-3 py-1 text-xs font-semibold text-white backdrop-blur-sm hover:bg-black/80"
+                >
+                  Close video
+                </button>
+                <iframe
+                  className="absolute inset-0 h-full w-full"
+                  src={homeYoutubeEmbedUrl}
+                  title="Web Explore AI homepage walkthrough"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  referrerPolicy="strict-origin-when-cross-origin"
+                />
+              </div>
+            )}
+          </div>
+        )}
+
         <button
           className="bg-gray-700 hover:bg-gray-800 text-white px-10 py-4 rounded-xl text-xl font-medium shadow-lg transition"
           onClick={() => navigate("/search")}

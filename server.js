@@ -193,7 +193,7 @@ async function checkUsageAndPlan(req, res, next) {
     let paidUsed = 0;
     let paidLimit = plan.usageLimit;
 
-    if (isPaidPlan) {
+    if (isPaidPlan && user.subscriptionStart) {
       const periodUsage = await prisma.usageLog.aggregate({
         where: { userId, createdAt: { gte: user.subscriptionStart } },
         _sum: { tokensUsed: true },
