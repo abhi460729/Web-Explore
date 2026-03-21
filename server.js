@@ -51,7 +51,8 @@ const TOOL_SCOPES = {
   ],
   calendar: [
     'https://www.googleapis.com/auth/calendar',
-    'https://www.googleapis.com/auth/calendar.events'
+    'https://www.googleapis.com/auth/calendar.events',
+    'https://www.googleapis.com/auth/tasks.readonly'
   ],
   docs: [
     'https://www.googleapis.com/auth/documents',
@@ -648,7 +649,7 @@ app.post("/api/search", checkUsageAndPlan, async (req, res) => {
   }
 });
 
-app.get("/api/calendar/today-meetings", async (req, res) => {
+app.get("/api/calendar/meetings", async (req, res) => {
   const userId = req.headers["x-user-id"];
   const focus = String(req.query.focus || "").trim().toLowerCase();
   const rawPastHours = Number(req.query.pastHours);
@@ -677,6 +678,7 @@ app.get("/api/calendar/today-meetings", async (req, res) => {
     oauth2Client.setCredentials(user.calendarTokens);
 
     const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+    const tasksApi = google.tasks({ version: 'v1', auth: oauth2Client });
 
     const now = new Date();
     const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
@@ -711,41 +713,74 @@ app.get("/api/calendar/today-meetings", async (req, res) => {
     };
 
     const response = await calendar.events.list(params);
-
     const events = response.data.items || [];
+    let tasks = [];
+    let tasksWarning = "";
+
+    try {
+      const taskListsResponse = await tasksApi.tasklists.list({ maxResults: 20 });
+      const taskLists = taskListsResponse.data.items || [];
+
+      const taskResults = await Promise.all(
+        taskLists.map(async (list) => {
+          if (!list.id) return [];
+
+          const taskListResponse = await tasksApi.tasks.list({
+            tasklist: list.id,
+            showCompleted: false,
+            showDeleted: false,
+            maxResults: 100,
+            dueMin: timeMin,
+            dueMax: timeMax
+          });
+
+          const items = taskListResponse.data.items || [];
+          return items.map((t) => ({
+            ...t,
+            _taskListTitle: list.title || "Tasks"
+          }));
+        })
+      );
+
+      tasks = taskResults.flat();
+    } catch (taskErr) {
+      console.warn("[WARN] Google Tasks fetch failed:", taskErr.message);
+      tasksWarning = "Tasks could not be fetched. Reconnect Calendar integration to grant Google Tasks access.";
+    }
+
     console.log("[DEBUG] Events count:", events.length);
+    console.log("[DEBUG] Tasks count:", tasks.length);
 
     if (events.length > 0) {
       console.log("[DEBUG] First event sample:", JSON.stringify(events[0], null, 2));
     }
 
-    if (events.length === 0) {
+    if (events.length === 0 && tasks.length === 0) {
       return res.json({
-        message: `No events found in the configured window (last ${pastHours} hours + next ${aheadHours} hours).`,
+        message: `No meetings, appointments, or tasks found in the configured window (last ${pastHours} hours + next ${aheadHours} hours).`,
         debug: {
-          count: 0,
+          eventCount: 0,
+          taskCount: 0,
           timeMin,
           timeMax,
           pastHours,
           aheadHours,
-          note: "If 0 events but you see them in web → re-authorize with calendar.readonly scope"
+          note: "If calendar/tasks exist but not returned, reconnect Calendar integration to refresh OAuth scopes."
         }
       });
     }
 
-    // IST offset for display (since API returns UTC dateTime)
-    const IST_DISPLAY_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+    const appointmentRegex = /(appointment|booking|slot|consultation|session)/i;
 
     const buildEventLine = (e) => {
       let time = "All Day";
 
       if (e.start?.dateTime) {
-        const utcDate = new Date(e.start.dateTime);
-        const istDate = new Date(utcDate.getTime() + IST_DISPLAY_OFFSET_MS);
-        time = istDate.toLocaleTimeString('en-IN', {
+        time = new Date(e.start.dateTime).toLocaleTimeString('en-IN', {
           hour: '2-digit',
           minute: '2-digit',
-          hour12: true
+          hour12: true,
+          timeZone: 'Asia/Kolkata'
         });
       } else if (e.start?.date) {
         time = "All Day";
@@ -753,6 +788,7 @@ app.get("/api/calendar/today-meetings", async (req, res) => {
 
       const meetingLink = e.hangoutLink || e.htmlLink || "";
       const location = e.location || "";
+      const attendeesArr = e.attendees || [];
       const attendees = (e.attendees || [])
         .map((a) => a.email || a.displayName)
         .filter(Boolean)
@@ -763,6 +799,11 @@ app.get("/api/calendar/today-meetings", async (req, res) => {
         .trim()
         .slice(0, 180);
 
+      const appointmentHaystack = `${e.summary || ""} ${e.description || ""}`;
+      const isAppointment = appointmentRegex.test(appointmentHaystack);
+      const isMeeting = !!meetingLink || attendeesArr.length > 0;
+      const kindLabel = isAppointment ? "Appointment" : isMeeting ? "Meeting" : "Event";
+
       const extra = [
         location ? `Location: ${location}` : "",
         attendees ? `Attendees: ${attendees}` : "",
@@ -770,7 +811,38 @@ app.get("/api/calendar/today-meetings", async (req, res) => {
         description ? `Notes: ${description}` : ""
       ].filter(Boolean).join(" | ");
 
-      return `📅 ${e.summary || "(No title)"} at ${time} (ID: ${e.id})${extra ? ` | ${extra}` : ""}`;
+      return `📅 [${kindLabel}] ${e.summary || "(No title)"} at ${time} (ID: ${e.id})${extra ? ` | ${extra}` : ""}`;
+    };
+
+    const buildTaskLine = (t) => {
+      const dueTime = t.due
+        ? new Date(t.due).toLocaleTimeString("en-IN", {
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: true,
+            timeZone: "Asia/Kolkata"
+          })
+        : "No due time";
+
+      const dueDate = t.due
+        ? new Date(t.due).toLocaleDateString("en-IN", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+            timeZone: "Asia/Kolkata"
+          })
+        : "No due date";
+
+      const notes = (t.notes || "").replace(/\s+/g, " ").trim().slice(0, 180);
+      const listTitle = t._taskListTitle || "Tasks";
+
+      const extra = [
+        `List: ${listTitle}`,
+        t.status ? `Status: ${t.status}` : "",
+        notes ? `Notes: ${notes}` : ""
+      ].filter(Boolean).join(" | ");
+
+      return `✅ [Task] ${t.title || "(Untitled task)"} due ${dueDate} ${dueTime}${extra ? ` | ${extra}` : ""}`;
     };
 
     const matchesFocus = (e) => {
@@ -788,22 +860,52 @@ app.get("/api/calendar/today-meetings", async (req, res) => {
       return haystack.includes(focus);
     };
 
-    const matchedEvents = focus ? events.filter(matchesFocus) : events;
-    const formatted = matchedEvents.map(buildEventLine).join("\n");
+    const matchesTaskFocus = (t) => {
+      if (!focus) return true;
 
-    if (focus && matchedEvents.length === 0) {
-      const fallback = events.slice(0, 2).map(buildEventLine).join("\n");
+      const haystack = [
+        t.title || "",
+        t.notes || "",
+        t._taskListTitle || ""
+      ].join(" ").toLowerCase();
+
+      return haystack.includes(focus);
+    };
+
+    const matchedEvents = focus ? events.filter(matchesFocus) : events;
+    const matchedTasks = focus ? tasks.filter(matchesTaskFocus) : tasks;
+    const formattedEvents = matchedEvents.map(buildEventLine).join("\n");
+    const formattedTasks = matchedTasks.map(buildTaskLine).join("\n");
+
+    if (focus && matchedEvents.length === 0 && matchedTasks.length === 0) {
+      const fallbackEvents = events.slice(0, 2).map(buildEventLine);
+      const fallbackTasks = tasks.slice(0, 2).map(buildTaskLine);
+      const fallback = [...fallbackEvents, ...fallbackTasks].join("\n");
       return res.json({
-        message: `Focus topic: ${focus}\n\nNo direct calendar match found for this focus in today's events.\n\nClosest items from today:\n${fallback || "No events available."}`,
-        debug: { count: events.length, matchedCount: 0, focus }
+        message: `Focus topic: ${focus}\n\nNo direct match found in today's meetings, appointments, or tasks.\n\nClosest items from today:\n${fallback || "No items available."}${tasksWarning ? `\n\nNote: ${tasksWarning}` : ""}`,
+        debug: { eventCount: events.length, taskCount: tasks.length, matchedCount: 0, focus }
       });
     }
 
+    const sections = [];
+    if (formattedEvents) sections.push(`Meetings & Appointments:\n${formattedEvents}`);
+    if (formattedTasks) sections.push(`Tasks:\n${formattedTasks}`);
+
     res.json({
       message: focus
-        ? `Focused calendar events for "${focus}":\n\n${formatted}`
-        : `Aaj ki meetings Google Calendar se:\n\n${formatted}`,
-      debug: { count: events.length, matchedCount: matchedEvents.length, focus, pastHours, aheadHours, timeMin, timeMax }
+        ? `Focused schedule for "${focus}":\n\n${sections.join("\n\n")}${tasksWarning ? `\n\nNote: ${tasksWarning}` : ""}`
+        : `Aaj ka combined schedule (meetings, appointments, tasks):\n\n${sections.join("\n\n")}${tasksWarning ? `\n\nNote: ${tasksWarning}` : ""}`,
+      debug: {
+        eventCount: events.length,
+        taskCount: tasks.length,
+        matchedEventCount: matchedEvents.length,
+        matchedTaskCount: matchedTasks.length,
+        focus,
+        pastHours,
+        aheadHours,
+        timeMin,
+        timeMax
+      }
     });
 
   } catch (err) {
@@ -2174,134 +2276,6 @@ Output:
     console.error("[Study Plan Workflow Error]:", err.message);
     res.status(500).json({
       error: "Failed to create study roadmap workflow",
-      details: err.message
-    });
-  }
-});
-
-app.get("/api/calendar/today-meetings", async (req, res) => {
-
-  try {
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { calendarTokens: true }
-    });
-
-    if (!user?.calendarTokens) {
-      return res.status(400).json({ error: "Please connect Google Calendar first" });
-    }
-
-    const oauth2Client = new OAuth2Client(
-      process.env.GOOGLE_CLIENT_ID,
-      process.env.GOOGLE_CLIENT_SECRET,
-      process.env.GOOGLE_REDIRECT_URI
-    );
-    oauth2Client.setCredentials(user.calendarTokens);
-
-    const calendar = google.calendar({ version: "v3", auth: oauth2Client });
-
-    const now = new Date();
-    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-
-    // Today start (IST midnight → UTC)
-    const todayStartUTC = new Date(now.getTime() + IST_OFFSET_MS);
-    todayStartUTC.setUTCHours(0, 0, 0, 0);
-    
-    // Today end (IST 23:59:59 → UTC)
-    const todayEndUTC = new Date(todayStartUTC);
-    todayEndUTC.setUTCHours(23, 59, 59, 999);
-
-    const timeMin = todayStartUTC.toISOString();  // e.g. 2026-03-17T18:30:00.000Z
-    const timeMax = todayEndUTC.toISOString();    // e.g. 2026-03-18T18:29:59.999Z
-
-    console.log("[DEBUG] Current UTC:", now.toISOString());
-    console.log("[DEBUG] IST approx:", now.toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }));
-    console.log("[DEBUG] timeMin:", timeMin);
-    console.log("[DEBUG] timeMax:", timeMax);
-
-    const response = await calendar.events.list({
-      calendarId: "primary",
-      timeMin,
-      timeMax,
-      singleEvents: true,
-      orderBy: "startTime",
-      maxResults: 100,
-      showDeleted: false,
-      timeZone: "Asia/Kolkata"
-    });
-
-    const events = response.data.items || [];
-
-    console.log("[DEBUG] Today's events count:", events.length);
-
-    if (events.length > 0) {
-      console.log("[DEBUG] First few events:");
-      events.slice(0, 5).forEach(e => {
-        console.log(`- ${e.summary || "No title"} | Start: ${e.start?.dateTime || e.start?.date || "unknown"}`);
-      });
-    }
-
-    if (events.length === 0) {
-      return res.json({
-        message: "🎉 Aaj ke liye koi event API se nahi mila.\n\nCheck karo:\n- Events March 18, 2026 ko primary calendar mein hain?\n- Event ka time zone 'Asia/Kolkata' set hai?\n- New test event banao abhi aur phir try karo.\nWeb pe dikhte hain toh calendarId 'primary' sahi hai ya nahi confirm karo.",
-        debug: { timeMin, timeMax, count: 0 }
-      });
-    }
-
-    // IST time ke liye
-    const formatTime = (dateTime) => {
-      if (!dateTime) return "All Day";
-      const dt = new Date(dateTime);
-      return dt.toLocaleTimeString("en-IN", {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: true,
-        timeZone: "Asia/Kolkata"
-      });
-    };
-
-    // Group by time slots
-    const morning = [], afternoon = [], evening = [], night = [], allDay = [];
-
-    events.forEach(e => {
-      const entry = `**${formatTime(e.start?.dateTime)}**: ${e.summary || "(No title)"} (ID: ${e.id.slice(0, 12)}...)`;
-
-      if (e.start?.date) {
-        allDay.push(`**All Day**: ${e.summary || "(No title)"} (ID: ${e.id.slice(0, 12)}...)`);
-        return;
-      }
-
-      const hour = new Date(e.start.dateTime).getUTCHours(); // UTC hour
-      const localHour = (hour + 5.5) % 24; // rough IST hour
-
-      if (localHour < 12) morning.push(entry);
-      else if (localHour < 17) afternoon.push(entry);
-      else if (localHour < 21) evening.push(entry);
-      else night.push(entry);
-    });
-
-    let summary = "Here's a summary of your meetings for today from Google Calendar:\n\n";
-
-    if (morning.length) summary += "### Morning\n" + morning.map(e => `- ${e}`).join("\n") + "\n\n";
-    if (afternoon.length) summary += "### Afternoon\n" + afternoon.map(e => `- ${e}`).join("\n") + "\n\n";
-    if (evening.length) summary += "### Evening\n" + evening.map(e => `- ${e}`).join("\n") + "\n\n";
-    if (night.length) summary += "### Late Evening/Night\n" + night.map(e => `- ${e}`).join("\n") + "\n\n";
-    if (allDay.length) summary += "### Additional Items\n" + allDay.join("\n") + "\n\n";
-
-    summary += "Notes:\n- Back-to-back schedules hain (flights + interviews) – time overlaps pe dhyan do.\n- Flight boarding time aur prep ready rakho.\n- Updates ke liye calendar check karte raho!\n\nBusy day ahead – all the best! 🚀";
-
-    res.json({
-      message: summary,
-      count: events.length,
-      debug: { timeMin, timeMax }
-    });
-
-  } catch (err) {
-    console.error("[ERROR] Calendar error:", err.message);
-    if (err.response?.data) console.error("Google details:", err.response.data);
-
-    res.status(500).json({
-      error: "Failed to fetch today's schedule",
       details: err.message
     });
   }

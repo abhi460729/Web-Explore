@@ -247,6 +247,7 @@ function App() {
       title: "Catch me up on Enterprise or Individual meetings and tasks",
       slug: "project-reminders",
       promptTemplate: "Connect Google Calendar, fetch meetings and tasks in real time, and summarize key updates",
+      embedUrl: "https://youtu.be/iyejLV7W3SY",
       fields: [
         { key: "task subject", label: "Focus topic (optional)", placeholder: "e.g. Website Redesign, Client Onboarding", required: false },
         { key: "past_hours", label: "Recent Past Window in Hours (optional)", placeholder: "e.g. 2", required: false },
@@ -257,6 +258,7 @@ function App() {
       title: "Research Competitors",
       slug: "research-competitors",
       promptTemplate: "Research my main competitors {{competitor names}} and create a detailed Google Doc report with their strengths, weaknesses, pricing, recent news and possible future plans",
+      embedUrl: "https://youtu.be/iyejLV7W3SY",
       fields: [
         { key: "competitor names", label: "Competitor Names (comma separated)", placeholder: "e.g. Canva, Figma, Notion", required: true }
       ]
@@ -499,7 +501,7 @@ function App() {
       return;
     }
 
-    const res = await fetch("/api/calendar/today-meetings", {
+    const res = await fetch("/api/calendar/meetings", {
       headers: {
         "x-user-id": user.id
       }
@@ -781,8 +783,23 @@ function App() {
       setValues((prev) => ({ ...prev, [key]: value }));
     };
 
+    const hasPitchStartupName = (values.startup_name?.trim?.() || "").length > 0;
+    const hasPitchSheetUrl = (values.sheet_url?.trim?.() || "").length > 0;
+    const hasPitchLocalFile = !!attachedInvestorFile;
+    const isPitchUsingLocalFile = hasPitchLocalFile;
+    const isPitchIntegrationReady = isPitchUsingLocalFile
+      ? integrations.docs
+      : integrations.docs && integrations.sheets;
+    const canExecutePitchEmails = hasPitchStartupName && (hasPitchSheetUrl || hasPitchLocalFile);
+    const pitchEmailsMissingRequirements = [
+      !hasPitchStartupName ? "Startup name is required" : "",
+      !hasPitchSheetUrl && !hasPitchLocalFile ? "Add a Google Sheet URL or attach a local investor file" : "",
+      !integrations.docs ? "Connect Google Docs" : "",
+      !isPitchUsingLocalFile && !integrations.sheets ? "Connect Google Sheets" : ""
+    ].filter(Boolean);
+
     const isValid = workflow.slug === "pitch-emails"
-      ? (values.startup_name?.trim?.() || "").length > 0 && (((values.sheet_url?.trim?.() || "").length > 0) || !!attachedInvestorFile)
+      ? canExecutePitchEmails
       : workflow.slug === "send-doc-emails"
       ? !!attachedDocFile || (values.doc_url?.trim?.() || "").length > 0
       : workflow.fields.every(
@@ -900,7 +917,7 @@ function App() {
 
           const query = params.toString() ? `?${params.toString()}` : "";
 
-          const res = await fetch(`/api/calendar/today-meetings${query}`, {
+          const res = await fetch(`/api/calendar/meetings${query}`, {
             headers: {
               "x-user-id": user?.id || ""
             }
@@ -965,6 +982,7 @@ function App() {
           const data = await res.json();
 
           if (!res.ok) {
+            showToast(data.error || "Failed to generate pitch emails", "error");
             console.error(data.error || "Failed to generate pitch emails");
             return;
           }
@@ -980,6 +998,7 @@ function App() {
             }
           });
         } catch (err) {
+          showToast("Failed to start pitch email automation", "error");
           console.error("Failed to start pitch email automation", err);
         }
 
@@ -1247,6 +1266,50 @@ function App() {
                 </div>
               ))}
             </div>
+
+            {workflow.slug === "pitch-emails" && (
+              <div className="mt-6 rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-4">
+                <div className="flex flex-wrap gap-3 mb-3">
+                  <button
+                    type="button"
+                    onClick={() => integrations.sheets ? disconnectGoogleTool("sheets") : connectGoogleTool("sheets")}
+                    className={`px-4 py-2 rounded-xl text-sm font-medium transition ${
+                      integrations.sheets
+                        ? "bg-gray-700 text-white hover:bg-gray-800"
+                        : "bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200"
+                    }`}
+                  >
+                    {integrations.sheets ? "Sheets Connected ✓" : "Connect Google Sheets"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => integrations.docs ? disconnectGoogleTool("docs") : connectGoogleTool("docs")}
+                    className={`px-4 py-2 rounded-xl text-sm font-medium transition ${
+                      integrations.docs
+                        ? "bg-gray-700 text-white hover:bg-gray-800"
+                        : "bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200"
+                    }`}
+                  >
+                    {integrations.docs ? "Docs Connected ✓" : "Connect Google Docs"}
+                  </button>
+                </div>
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                  {hasPitchLocalFile
+                    ? "Local file mode needs Google Docs connection only."
+                    : "Google Sheet URL mode needs both Google Sheets and Google Docs connected."}
+                </p>
+                {!canExecutePitchEmails && pitchEmailsMissingRequirements.length > 0 && (
+                  <p className="mt-2 text-sm text-red-600 dark:text-red-400">
+                    Before executing: {pitchEmailsMissingRequirements.join(" • ")}
+                  </p>
+                )}
+                {canExecutePitchEmails && !isPitchIntegrationReady && (
+                  <p className="mt-2 text-sm text-amber-600 dark:text-amber-400">
+                    Execute can still be tried, but backend may ask you to reconnect missing integrations: {pitchEmailsMissingRequirements.join(" • ")}
+                  </p>
+                )}
+              </div>
+            )}
 
             <button
               onClick={handleGenerate}
