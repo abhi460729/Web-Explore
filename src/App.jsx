@@ -267,6 +267,7 @@ function App() {
       title: "Personalized Pitch Emails",
       slug: "pitch-emails",
       promptTemplate: "I have a Google Sheet with potential investors (columns: Name, Email, Focus Areas). Draft personalized cold pitch emails for each one highlighting why my startup fits their investment thesis and save all drafts in Google Docs.",
+      embedUrl: "https://youtu.be/kh2_4JGzMdo",
       fields: [
         { key: "sheet_url", label: "Google Sheet URL", placeholder: "https://docs.google.com/spreadsheets/d/...", required: true },
         { key: "startup_name", label: "Your Startup Name", placeholder: "e.g. Taskify AI", required: true }
@@ -276,6 +277,7 @@ function App() {
       title: "Send Pitch Emails from Google Docs",
       slug: "send-doc-emails",
       promptTemplate: "Attach a Google Doc containing pitch email drafts and send those emails directly via Gmail.",
+      embedUrl: "https://youtu.be/3BIHszVxZXc",
       fields: [
         { key: "doc_url", label: "Google Doc URL", placeholder: "https://docs.google.com/document/d/...", required: true },
         { key: "recipient_emails", label: "Fallback Recipient Emails (optional)", placeholder: "email1@domain.com, email2@domain.com", required: false },
@@ -954,6 +956,48 @@ function App() {
         try {
           const hasLocalFile = !!attachedInvestorFile;
 
+          let docsConnected = !!integrations.docs;
+          let sheetsConnected = !!integrations.sheets;
+
+          try {
+            const integrationsRes = await fetch("/api/integrations", {
+              headers: {
+                "x-user-id": user?.id || ""
+              }
+            });
+
+            const integrationsContentType = integrationsRes.headers.get("content-type") || "";
+            let integrationsData = null;
+
+            if (integrationsContentType.includes("application/json")) {
+              integrationsData = await integrationsRes.json();
+            } else {
+              await integrationsRes.text();
+            }
+
+            if (integrationsRes.ok && integrationsData) {
+              docsConnected = !!integrationsData.docs;
+              sheetsConnected = !!integrationsData.sheets;
+              setIntegrations((prev) => ({
+                ...prev,
+                docs: docsConnected,
+                sheets: sheetsConnected
+              }));
+            }
+          } catch (integrationErr) {
+            console.error("Pitch workflow integration pre-check failed", integrationErr);
+          }
+
+          if (!docsConnected || (!hasLocalFile && !sheetsConnected)) {
+            const missing = [
+              !docsConnected ? "Google Docs" : "",
+              !hasLocalFile && !sheetsConnected ? "Google Sheets" : ""
+            ].filter(Boolean);
+
+            showToast(`Please connect ${missing.join(" and ")} and try again.`, "error");
+            return;
+          }
+
           const res = hasLocalFile
             ? await fetch("/api/workflows/pitch-emails/upload-start", {
                 method: "POST",
@@ -979,7 +1023,16 @@ function App() {
                 })
               });
 
-          const data = await res.json();
+          let data = null;
+          const contentType = res.headers.get("content-type") || "";
+          if (contentType.includes("application/json")) {
+            data = await res.json();
+          } else {
+            const rawText = await res.text();
+            data = {
+              error: rawText?.trim?.() || "Unexpected non-JSON response from server"
+            };
+          }
 
           if (!res.ok) {
             showToast(data.error || "Failed to generate pitch emails", "error");
@@ -998,7 +1051,7 @@ function App() {
             }
           });
         } catch (err) {
-          showToast("Failed to start pitch email automation", "error");
+          showToast(`Failed to start pitch email automation: ${err?.message || "Unexpected error"}`, "error");
           console.error("Failed to start pitch email automation", err);
         }
 
@@ -1116,6 +1169,18 @@ function App() {
 
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 py-12 px-4 sm:px-6 lg:px-8">
+        {toast && (
+          <div
+            className={`fixed top-5 right-5 z-50 flex items-center gap-3 px-5 py-3.5 rounded-xl shadow-lg text-white text-sm font-medium transition-all ${
+              toast.type === "success" ? "bg-green-600" : toast.type === "error" ? "bg-red-600" : "bg-blue-600"
+            }`}
+          >
+            <span>{toast.message}</span>
+            <button onClick={() => setToast(null)} className="ml-2 opacity-70 hover:opacity-100">
+              <X size={15} />
+            </button>
+          </div>
+        )}
         <div className="max-w-2xl mx-auto">
           <div className="text-center mb-8">
             <button
@@ -1312,6 +1377,7 @@ function App() {
             )}
 
             <button
+              type="button"
               onClick={handleGenerate}
               disabled={!isValid || isExecutingWorkflow}
               className={`mt-8 w-full py-4 rounded-2xl font-semibold text-lg transition-all ${
