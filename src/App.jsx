@@ -288,6 +288,7 @@ function App() {
       title: "Learning Roadmap",
       slug: "study-plan",
       promptTemplate: "Create a study roadmap in Google Docs, generate practice questions in Google Sheets, and send recurring progress emails via Gmail.",
+      embedUrl: "https://youtu.be/7w4XpQjRx58",
       fields: [
         { key: "topic", label: "Study Topic", placeholder: "e.g. Data Structures and Algorithms", required: true },
         { key: "current_level", label: "Current Level (optional)", placeholder: "e.g. beginner, intermediate, advanced", required: false },
