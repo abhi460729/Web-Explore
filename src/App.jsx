@@ -3,6 +3,7 @@ import { useParams, useLocation, useNavigate } from "react-router-dom";
 import debounce from "lodash/debounce";
 import DOMPurify from "dompurify";
 import { Plus, User, X, Bot, Globe, Mic, Sun, Moon, Check, Zap, ArrowLeft } from "lucide-react";
+import { jsPDF } from "jspdf";
 import { v4 as uuidv4 } from "uuid";
 
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -12,6 +13,116 @@ if (recognition) {
   recognition.interimResults = false;
   recognition.lang = "en-US";
 }
+
+const loadImageAsDataUrl = (url) => new Promise((resolve) => {
+  if (!url) {
+    resolve(null);
+    return;
+  }
+
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  img.onload = () => {
+    try {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0);
+      resolve(canvas.toDataURL("image/png"));
+    } catch {
+      resolve(null);
+    }
+  };
+  img.onerror = () => resolve(null);
+  img.src = url;
+});
+
+const addParagraph = (doc, text, x, y, width, lineHeight = 16) => {
+  const lines = doc.splitTextToSize(text, width);
+  doc.text(lines, x, y);
+  return y + lines.length * lineHeight;
+};
+
+const downloadExperienceLetterPdf = async (payload) => {
+  const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 48;
+  const contentWidth = pageWidth - margin * 2;
+  let cursorY = margin;
+
+  const letterheadImage = await loadImageAsDataUrl(payload.letterheadUrl);
+  if (letterheadImage) {
+    doc.addImage(letterheadImage, "PNG", margin, cursorY, contentWidth, 72);
+    cursorY += 92;
+  } else {
+    doc.setFillColor(243, 244, 246);
+    doc.roundedRect(margin, cursorY, contentWidth, 58, 12, 12, "F");
+    doc.setTextColor(31, 41, 55);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(20);
+    doc.text(payload.companyName, margin + 18, cursorY + 28);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.text("Official Experience Letter", margin + 18, cursorY + 46);
+    cursorY += 82;
+  }
+
+  doc.setTextColor(17, 24, 39);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(18);
+  doc.text("EXPERIENCE LETTER", pageWidth / 2, cursorY, { align: "center" });
+  cursorY += 26;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(11);
+  doc.text(`Date: ${payload.issueDate}`, pageWidth - margin, cursorY, { align: "right" });
+  cursorY += 32;
+
+  doc.setFont("helvetica", "bold");
+  doc.text("TO WHOM IT MAY CONCERN", margin, cursorY);
+  cursorY += 24;
+
+  doc.setFont("helvetica", "normal");
+  payload.paragraphs.forEach((paragraph) => {
+    cursorY = addParagraph(doc, paragraph, margin, cursorY, contentWidth);
+    cursorY += 10;
+  });
+
+  cursorY += 12;
+  doc.text("Yours faithfully,", margin, cursorY);
+  cursorY += 18;
+
+  const signatureImage = await loadImageAsDataUrl(payload.signatureUrl);
+  if (signatureImage) {
+    doc.addImage(signatureImage, "PNG", margin, cursorY, 132, 44);
+    cursorY += 52;
+  } else {
+    doc.setDrawColor(156, 163, 175);
+    doc.line(margin, cursorY + 18, margin + 132, cursorY + 18);
+    cursorY += 28;
+  }
+
+  doc.setFont("helvetica", "bold");
+  doc.text(payload.signatoryName, margin, cursorY);
+  cursorY += 16;
+  doc.setFont("helvetica", "normal");
+  doc.text(payload.signatoryTitle, margin, cursorY);
+  cursorY += 16;
+  doc.text(payload.companyName, margin, cursorY);
+
+  doc.setFontSize(9);
+  doc.setTextColor(107, 114, 128);
+  doc.text(
+    "This document is system-generated and must be reviewed, approved, and signed by authorized HR personnel before external use.",
+    margin,
+    pageHeight - 28
+  );
+
+  const safeName = payload.employeeName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "employee";
+  doc.save(`experience-letter-${safeName}.pdf`);
+};
 
 function App() {
   const { id } = useParams();
@@ -63,6 +174,18 @@ function App() {
   const [isProfileSidebarOpen, setIsProfileSidebarOpen] = useState(false);
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("answer");
+  const [imageResults, setImageResults] = useState([]);
+  const [imageResultsQuery, setImageResultsQuery] = useState("");
+  const [imagesLoading, setImagesLoading] = useState(false);
+  const [videoResults, setVideoResults] = useState([]);
+  const [videoResultsQuery, setVideoResultsQuery] = useState("");
+  const [videosLoading, setVideosLoading] = useState(false);
+  const [shortVideoResults, setShortVideoResults] = useState([]);
+  const [shortVideoResultsQuery, setShortVideoResultsQuery] = useState("");
+  const [shortVideosLoading, setShortVideosLoading] = useState(false);
+  const [newsResults, setNewsResults] = useState([]);
+  const [newsResultsQuery, setNewsResultsQuery] = useState("");
+  const [newsLoading, setNewsLoading] = useState(false);
   const [theme, setTheme] = useState(localStorage.getItem("theme") || "light");
   const [values, setValues] = useState({});
   const [attachedInvestorFile, setAttachedInvestorFile] = useState(null);
@@ -88,8 +211,15 @@ function App() {
   const isUltraUser = currentPlanName === "ULTRA";
 
   const handleUpgradePlanClick = (e) => {
-    e.stopPropagation();
+    e?.preventDefault?.();
+    e?.stopPropagation?.();
     navigate("/pricing");
+  };
+
+  const handleWorkflowCardClick = (e, slug) => {
+    if (e.defaultPrevented) return;
+    if (e.target.closest("button")) return;
+    navigate(`/workflow-input/${slug}`);
   };
 
   const models = [
@@ -179,6 +309,24 @@ function App() {
       ]
     },
     {
+      title: "Podcaster - Guest Insight Questions",
+      slug: "podcaster-guest-insight",
+      category: "Communication",
+      promptTemplate: "You are an elite podcast pre-production assistant. Build a guest-history-aligned interview plan for episode theme {{episode_theme}}.\n\nGuest Name: {{guest_name}}\nRole/Title: {{guest_role}}\nAudience Type: {{audience_type}}\nDesired Tone: {{interview_tone}}\nTarget Episode Length (minutes): {{episode_length_minutes}}\nGuest Bio / Profile Links: {{guest_bio}}\nMajor Milestones Timeline: {{guest_milestones}}\nNotable Achievements: {{guest_achievements}}\nSensitive Topics to Avoid: {{sensitive_topics}}\n\nRequirements:\n1) Ask exactly 20 main questions and align each question to specific guest history.\n2) For each question include: history reference used, why it matters for listeners, one follow-up prompt, priority tag (Must-Ask/Good-to-Ask/Optional), estimated time in minutes, and relevance score (1-10).\n3) Use this exact distribution: Origin story (3), Turning points (4), Challenges/failures (3), Signature work/decision process (3), Industry insights (3), Future plans (2), Personal close/rapid fire (2).\n4) Apply duplicate-question check: no repeated intent across main questions.\n5) Apply risk filter: if a question can touch sensitive topics, flag it and provide a safer alternative phrasing.\n6) End with a recommended interview flow timeline and Top 5 must-ask questions.",
+      fields: [
+        { key: "guest_name", label: "Guest Name", placeholder: "e.g. Kunal Shah", required: true },
+        { key: "episode_theme", label: "Episode Theme", placeholder: "e.g. Building resilient startups in India", required: true },
+        { key: "guest_role", label: "Guest Role / Title", placeholder: "e.g. Founder and CEO at CRED", required: true },
+        { key: "guest_bio", label: "Guest Bio / Profile Links", placeholder: "Paste a short bio and relevant profile links", required: true, multiline: true, rows: 4 },
+        { key: "guest_milestones", label: "Major Career Milestones", placeholder: "List timeline events with year and milestone", required: true, multiline: true, rows: 5 },
+        { key: "guest_achievements", label: "Notable Achievements", placeholder: "Awards, exits, books, launches, major outcomes", required: false, multiline: true, rows: 3 },
+        { key: "sensitive_topics", label: "Sensitive Topics to Avoid", placeholder: "Any topics to avoid or approach carefully", required: false, multiline: true, rows: 3 },
+        { key: "interview_tone", label: "Desired Interview Tone", placeholder: "e.g. bold, casual, technical, inspiring", required: false },
+        { key: "audience_type", label: "Audience Type", placeholder: "e.g. founders, creators, beginners, enterprise leaders", required: false },
+        { key: "episode_length_minutes", label: "Target Episode Length (minutes)", placeholder: "e.g. 60", required: false }
+      ]
+    },
+    {
       title: "HR Ops - Onboarding Email",
       slug: "hr-ops",
       category: "HR Automation",
@@ -206,6 +354,39 @@ function App() {
         { key: "company_email", label: "Company Email", placeholder: "e.g. rohan.mehta@company.com", required: true },
         { key: "security_code", label: "Security Code", placeholder: "e.g. 123456", required: true },
         { key: "hr_email", label: "HR Email", placeholder: "e.g. hr@company.com", required: true }
+      ]
+    },
+    {
+      title: "HR Release Email",
+      slug: "hr-release",
+      category: "HR Automation",
+      promptTemplate: "Draft an HR release/offboarding email for {{employee_name}} ({{employee_email}}) with last working day {{last_working_day}}, reason {{reason}}, final settlement {{final_settlement}}, and return instructions. Keep it professional and supportive.",
+      fields: [
+        { key: "employee_name", label: "Employee Name", placeholder: "e.g. Rohan Mehta", required: true },
+        { key: "employee_email", label: "Employee Email", placeholder: "e.g. rohan.mehta@email.com", required: true },
+        { key: "last_working_day", label: "Last Working Day", placeholder: "e.g. 2026-03-31", required: true },
+        { key: "reason", label: "Reason for Release", placeholder: "e.g. Resignation, Termination, Contract End", required: true },
+        { key: "final_settlement", label: "Final Settlement Details", placeholder: "e.g. Pending salary, gratuity, dues", required: true },
+        { key: "hr_manager_name", label: "HR Manager Name", placeholder: "e.g. Priya Sharma", required: true }
+      ]
+    },
+    {
+      title: "Experience Letter",
+      slug: "experience-letter",
+      category: "HR Automation",
+      promptTemplate: "Generate a professional experience letter for {{employee_name}} who worked as {{designation}} in {{department}} from {{joining_date}} to {{leaving_date}}. Manager: {{manager_name}}. Include key responsibilities and achievements. Note: This needs manual review and authorized signature to be legally valid.",
+      fields: [
+        { key: "employee_name", label: "Employee Name", placeholder: "e.g. Rohan Mehta", required: true },
+        { key: "designation", label: "Designation / Role", placeholder: "e.g. Product Analyst", required: true },
+        { key: "department", label: "Department", placeholder: "e.g. Product Management", required: true },
+        { key: "joining_date", label: "Joining Date", placeholder: "e.g. 2023-06-01", required: true },
+        { key: "leaving_date", label: "Leaving Date", placeholder: "e.g. 2026-03-31", required: true },
+        { key: "manager_name", label: "Reporting Manager Name", placeholder: "e.g. Anita Sharma", required: true },
+        { key: "company_name", label: "Company Name", placeholder: "e.g. TechCorp India", required: true },
+        { key: "authorized_signatory_name", label: "Authorized Signatory Name", placeholder: "e.g. Priya Sharma", required: true },
+        { key: "authorized_signatory_title", label: "Authorized Signatory Title", placeholder: "e.g. HR Manager", required: true },
+        { key: "company_letterhead_url", label: "Company Letterhead Image URL (optional)", placeholder: "https://example.com/letterhead.png", required: false },
+        { key: "signature_image_url", label: "E-Signature Image URL (optional)", placeholder: "https://example.com/signature.png", required: false }
       ]
     },
     {
@@ -333,6 +514,66 @@ function App() {
         { key: "doc_url", label: "Google Doc URL", placeholder: "https://docs.google.com/document/d/...", required: true },
         { key: "recipient_emails", label: "Fallback Recipient Emails (optional)", placeholder: "email1@domain.com, email2@domain.com", required: false },
         { key: "default_subject", label: "Default Subject (optional)", placeholder: "Quick intro - startup fit", required: false }
+      ]
+    },
+    {
+      title: "Weekly Class Timetable Generator",
+      slug: "weekly-timetable",
+      category: "Learning & Education",
+      promptTemplate: "You are a school timetable formatter and auditor. Use the exact user-provided 5-day, 7-period manual grid for {{class_name}}. Do not auto-reassign slots.\n\nManual Slot Entries (Subject - Teacher):\nMonday: P1 {{mon_p1}}, P2 {{mon_p2}}, P3 {{mon_p3}}, P4 {{mon_p4}}, P5 {{mon_p5}}, P6 {{mon_p6}}, P7 {{mon_p7}}\nTuesday: P1 {{tue_p1}}, P2 {{tue_p2}}, P3 {{tue_p3}}, P4 {{tue_p4}}, P5 {{tue_p5}}, P6 {{tue_p6}}, P7 {{tue_p7}}\nWednesday: P1 {{wed_p1}}, P2 {{wed_p2}}, P3 {{wed_p3}}, P4 {{wed_p4}}, P5 {{wed_p5}}, P6 {{wed_p6}}, P7 {{wed_p7}}\nThursday: P1 {{thu_p1}}, P2 {{thu_p2}}, P3 {{thu_p3}}, P4 {{thu_p4}}, P5 {{thu_p5}}, P6 {{thu_p6}}, P7 {{thu_p7}}\nFriday: P1 {{fri_p1}}, P2 {{fri_p2}}, P3 {{fri_p3}}, P4 {{fri_p4}}, P5 {{fri_p5}}, P6 {{fri_p6}}, P7 {{fri_p7}}\n\nRequirements:\n1) Render a clean timetable grid exactly in Mon-Fri rows and Period 1-7 columns using the slot values above.\n2) Keep entries exactly as provided. Do not optimize, reshuffle, or replace subjects/teachers.\n3) Validate and then report: duplicate overloads, too many consecutive same-subject periods, and any obvious teacher scheduling risks.\n4) Add a Subject Load Summary table: Subject | Teacher | Periods per Week.\n5) End with a short Recommendations section with only non-destructive suggestions (no slot changes unless user asks).",
+      fields: [
+        { key: "class_name", label: "Class / Grade", placeholder: "e.g. Class 8 - Section A", required: true },
+        { key: "mon_p1", label: "Monday - Period 1", placeholder: "e.g. Mathematics - Mr. Sharma", required: true },
+        { key: "mon_p2", label: "Monday - Period 2", placeholder: "e.g. English - Ms. Khan", required: true },
+        { key: "mon_p3", label: "Monday - Period 3", placeholder: "e.g. Science - Ms. Patel", required: true },
+        { key: "mon_p4", label: "Monday - Period 4", placeholder: "e.g. Hindi - Mr. Verma", required: true },
+        { key: "mon_p5", label: "Monday - Period 5", placeholder: "e.g. Social Studies - Ms. Gupta", required: true },
+        { key: "mon_p6", label: "Monday - Period 6", placeholder: "e.g. Computer - Mr. Singh", required: true },
+        { key: "mon_p7", label: "Monday - Period 7", placeholder: "e.g. PT - Coach Yadav", required: true },
+        { key: "tue_p1", label: "Tuesday - Period 1", placeholder: "e.g. Mathematics - Mr. Sharma", required: true },
+        { key: "tue_p2", label: "Tuesday - Period 2", placeholder: "e.g. English - Ms. Khan", required: true },
+        { key: "tue_p3", label: "Tuesday - Period 3", placeholder: "e.g. Science - Ms. Patel", required: true },
+        { key: "tue_p4", label: "Tuesday - Period 4", placeholder: "e.g. Hindi - Mr. Verma", required: true },
+        { key: "tue_p5", label: "Tuesday - Period 5", placeholder: "e.g. Social Studies - Ms. Gupta", required: true },
+        { key: "tue_p6", label: "Tuesday - Period 6", placeholder: "e.g. Computer - Mr. Singh", required: true },
+        { key: "tue_p7", label: "Tuesday - Period 7", placeholder: "e.g. Library - Ms. Roy", required: true },
+        { key: "wed_p1", label: "Wednesday - Period 1", placeholder: "e.g. Mathematics - Mr. Sharma", required: true },
+        { key: "wed_p2", label: "Wednesday - Period 2", placeholder: "e.g. English - Ms. Khan", required: true },
+        { key: "wed_p3", label: "Wednesday - Period 3", placeholder: "e.g. Science - Ms. Patel", required: true },
+        { key: "wed_p4", label: "Wednesday - Period 4", placeholder: "e.g. Hindi - Mr. Verma", required: true },
+        { key: "wed_p5", label: "Wednesday - Period 5", placeholder: "e.g. Social Studies - Ms. Gupta", required: true },
+        { key: "wed_p6", label: "Wednesday - Period 6", placeholder: "e.g. Art - Ms. Das", required: true },
+        { key: "wed_p7", label: "Wednesday - Period 7", placeholder: "e.g. Computer - Mr. Singh", required: true },
+        { key: "thu_p1", label: "Thursday - Period 1", placeholder: "e.g. Mathematics - Mr. Sharma", required: true },
+        { key: "thu_p2", label: "Thursday - Period 2", placeholder: "e.g. English - Ms. Khan", required: true },
+        { key: "thu_p3", label: "Thursday - Period 3", placeholder: "e.g. Science - Ms. Patel", required: true },
+        { key: "thu_p4", label: "Thursday - Period 4", placeholder: "e.g. Hindi - Mr. Verma", required: true },
+        { key: "thu_p5", label: "Thursday - Period 5", placeholder: "e.g. Social Studies - Ms. Gupta", required: true },
+        { key: "thu_p6", label: "Thursday - Period 6", placeholder: "e.g. Computer - Mr. Singh", required: true },
+        { key: "thu_p7", label: "Thursday - Period 7", placeholder: "e.g. PT - Coach Yadav", required: true },
+        { key: "fri_p1", label: "Friday - Period 1", placeholder: "e.g. Mathematics - Mr. Sharma", required: true },
+        { key: "fri_p2", label: "Friday - Period 2", placeholder: "e.g. English - Ms. Khan", required: true },
+        { key: "fri_p3", label: "Friday - Period 3", placeholder: "e.g. Science - Ms. Patel", required: true },
+        { key: "fri_p4", label: "Friday - Period 4", placeholder: "e.g. Hindi - Mr. Verma", required: true },
+        { key: "fri_p5", label: "Friday - Period 5", placeholder: "e.g. Social Studies - Ms. Gupta", required: true },
+        { key: "fri_p6", label: "Friday - Period 6", placeholder: "e.g. Computer - Mr. Singh", required: true },
+        { key: "fri_p7", label: "Friday - Period 7", placeholder: "e.g. Activity - Ms. Roy", required: true },
+        { key: "recipient_emails", label: "Recipient Emails", placeholder: "e.g. principal@school.edu, class8a.parents@school.edu", required: false }
+      ]
+    },
+    {
+      title: "Tuition Classes Timetable Generator",
+      slug: "tuition-timetable",
+      category: "Learning & Education",
+      promptTemplate: "You are a tuition timetable planner and formatter. Build a clean Monday to Friday timetable from the user-provided 1-hour slots. Classes can be at any time, but each class duration must be exactly 1 hour. Do not auto-add or remove classes.\n\nTuition Batch: {{class_name}}\nMonday slots:\n{{monday_slots}}\nTuesday slots:\n{{tuesday_slots}}\nWednesday slots:\n{{wednesday_slots}}\nThursday slots:\n{{thursday_slots}}\nFriday slots:\n{{friday_slots}}\n\nRules:\n1) Parse each day input as one slot per line in this format: HH:MM-HH:MM | Subject | Teacher.\n2) Keep only valid 1-hour slots. If any slot is invalid, list it in Validation Issues.\n3) Output a final timetable grouped by day and sorted by start time.\n4) Add a Weekly Summary table with total classes per subject and teacher.\n5) End with a short clash check (teacher overlap across same time slots).",
+      fields: [
+        { key: "class_name", label: "Tuition Batch / Class Name", placeholder: "e.g. Class 10 Science Batch A", required: true },
+        { key: "monday_slots", label: "Monday Slots", placeholder: "e.g. 16:00-17:00 | Maths | Mr. Sharma", required: true, multiline: true, rows: 4 },
+        { key: "tuesday_slots", label: "Tuesday Slots", placeholder: "e.g. 17:00-18:00 | Physics | Ms. Gupta", required: true, multiline: true, rows: 4 },
+        { key: "wednesday_slots", label: "Wednesday Slots", placeholder: "e.g. 18:00-19:00 | Chemistry | Mr. Verma", required: true, multiline: true, rows: 4 },
+        { key: "thursday_slots", label: "Thursday Slots", placeholder: "e.g. 15:00-16:00 | English | Ms. Khan", required: true, multiline: true, rows: 4 },
+        { key: "friday_slots", label: "Friday Slots", placeholder: "e.g. 19:00-20:00 | Biology | Dr. Das", required: true, multiline: true, rows: 4 },
+        { key: "recipient_emails", label: "Recipient Emails", placeholder: "e.g. parent1@email.com, parent2@email.com", required: false }
       ]
     },
     {
@@ -471,10 +712,33 @@ function App() {
 
   const extractYouTubeId = (url = "") => {
     const trimmedUrl = url.trim();
+    if (!trimmedUrl) return "";
+
+    try {
+      const parsed = new URL(trimmedUrl);
+      const host = parsed.hostname.replace(/^www\./, "").replace(/^m\./, "");
+      const pathParts = parsed.pathname.split("/").filter(Boolean);
+
+      if (host === "youtu.be" && pathParts[0]) {
+        return pathParts[0];
+      }
+
+      if (host.includes("youtube.com") || host.includes("youtube-nocookie.com")) {
+        const vParam = parsed.searchParams.get("v");
+        if (vParam) return vParam;
+
+        if (["embed", "shorts", "live", "reel"].includes(pathParts[0]) && pathParts[1]) {
+          return pathParts[1];
+        }
+      }
+    } catch {
+      // Fall back to regex parsing for non-standard/partial URLs.
+    }
+
     const shortMatch = trimmedUrl.match(/youtu\.be\/([a-zA-Z0-9_-]{6,})/);
     if (shortMatch?.[1]) return shortMatch[1];
 
-    const embedMatch = trimmedUrl.match(/youtube(?:-nocookie)?\.com\/embed\/([a-zA-Z0-9_-]{6,})/);
+    const embedMatch = trimmedUrl.match(/youtube(?:-nocookie)?\.com\/(?:embed|shorts|live|reel)\/([a-zA-Z0-9_-]{6,})/);
     if (embedMatch?.[1]) return embedMatch[1];
 
     const watchMatch = trimmedUrl.match(/[?&]v=([a-zA-Z0-9_-]{6,})/);
@@ -667,7 +931,182 @@ function App() {
     return wordCount <= 20;
   }
 
-  const showTab = (tab) => setActiveTab(tab);
+  const fetchImageResults = async (rawQuery) => {
+    const effectiveQuery = String(rawQuery || "").trim();
+    if (!effectiveQuery) {
+      setImageResults([]);
+      setImageResultsQuery("");
+      return;
+    }
+
+    if (imageResultsQuery === effectiveQuery && imageResults.length > 0) {
+      return;
+    }
+
+    setImagesLoading(true);
+    try {
+      const res = await fetch("/api/search/images", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-id": user?.id || "",
+        },
+        body: JSON.stringify({ query: effectiveQuery }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to fetch images");
+      }
+
+      setImageResults(Array.isArray(data.images) ? data.images : []);
+      setImageResultsQuery(effectiveQuery);
+    } catch (err) {
+      console.error("Failed to fetch images:", err);
+      setImageResults([]);
+      setImageResultsQuery(effectiveQuery);
+    } finally {
+      setImagesLoading(false);
+    }
+  };
+
+  const fetchVideoResults = async (rawQuery) => {
+    const effectiveQuery = String(rawQuery || "").trim();
+    if (!effectiveQuery) {
+      setVideoResults([]);
+      setVideoResultsQuery("");
+      return;
+    }
+
+    if (videoResultsQuery === effectiveQuery && videoResults.length > 0) {
+      return;
+    }
+
+    setVideosLoading(true);
+    try {
+      const res = await fetch("/api/search/videos", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-id": user?.id || "",
+        },
+        body: JSON.stringify({ query: effectiveQuery }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to fetch videos");
+      }
+
+      setVideoResults(data.videos || []);
+      setVideoResultsQuery(effectiveQuery);
+    } catch (err) {
+      console.error("Failed to fetch videos:", err);
+      setVideoResults([]);
+      setVideoResultsQuery(effectiveQuery);
+    } finally {
+      setVideosLoading(false);
+    }
+  };
+
+  const fetchShortVideoResults = async (rawQuery) => {
+    const effectiveQuery = String(rawQuery || "").trim();
+    if (!effectiveQuery) {
+      setShortVideoResults([]);
+      setShortVideoResultsQuery("");
+      return;
+    }
+
+    if (shortVideoResultsQuery === effectiveQuery && shortVideoResults.length > 0) {
+      return;
+    }
+
+    setShortVideosLoading(true);
+    try {
+      const res = await fetch("/api/search/short-videos", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-id": user?.id || "",
+        },
+        body: JSON.stringify({ query: effectiveQuery }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to fetch short videos");
+      }
+
+      setShortVideoResults(data.videos || []);
+      setShortVideoResultsQuery(effectiveQuery);
+    } catch (err) {
+      console.error("Failed to fetch short videos:", err);
+      setShortVideoResults([]);
+      setShortVideoResultsQuery(effectiveQuery);
+    } finally {
+      setShortVideosLoading(false);
+    }
+  };
+
+  const fetchNewsResults = async (rawQuery) => {
+    const effectiveQuery = String(rawQuery || "").trim();
+    if (!effectiveQuery) {
+      setNewsResults([]);
+      setNewsResultsQuery("");
+      return;
+    }
+
+    if (newsResultsQuery === effectiveQuery && newsResults.length > 0) {
+      return;
+    }
+
+    setNewsLoading(true);
+    try {
+      const res = await fetch("/api/search/news", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-user-id": user?.id || "",
+        },
+        body: JSON.stringify({ query: effectiveQuery }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data?.error || "Failed to fetch news");
+      }
+
+      setNewsResults(data.news || []);
+      setNewsResultsQuery(effectiveQuery);
+    } catch (err) {
+      console.error("Failed to fetch news:", err);
+      setNewsResults([]);
+      setNewsResultsQuery(effectiveQuery);
+    } finally {
+      setNewsLoading(false);
+    }
+  };
+
+  const showTab = async (tab) => {
+    setActiveTab(tab);
+    const routeQuery = new URLSearchParams(location.search).get("query") || prompt;
+    if (tab === "images" && mode === "ai") {
+      await fetchImageResults(routeQuery);
+    }
+    if (tab === "videos") {
+      await fetchVideoResults(routeQuery);
+    }
+    if (tab === "short-videos") {
+      await fetchShortVideoResults(routeQuery);
+    }
+    if (tab === "news") {
+      await fetchNewsResults(routeQuery);
+    }
+  };
 
   const handleSuggestionClick = (suggestion) => {
     setPrompt(suggestion);
@@ -690,6 +1129,14 @@ function App() {
     setError("");
     setResponse(null);
     setActiveTab("answer");
+    setImageResults([]);
+    setImageResultsQuery("");
+    setVideoResults([]);
+    setVideoResultsQuery("");
+    setShortVideoResults([]);
+    setShortVideoResultsQuery("");
+    setNewsResults([]);
+    setNewsResultsQuery("");
 
     const tempId = uuidv4();
     const querySlug = generateQuerySlug(query);
@@ -761,6 +1208,14 @@ function App() {
     setLoading(true);
     setError("");
     setResponse(null);
+    setImageResults([]);
+    setImageResultsQuery("");
+    setVideoResults([]);
+    setVideoResultsQuery("");
+    setShortVideoResults([]);
+    setShortVideoResultsQuery("");
+    setNewsResults([]);
+    setNewsResultsQuery("");
 
     try {
       let res, data;
@@ -867,11 +1322,30 @@ function App() {
       "research-competitors",
       "hr-ops",
       "leadership-hr-handover",
+      "hr-release",
+      "experience-letter",
       "pitch-emails",
       "send-doc-emails",
-      "study-plan"
+      "study-plan",
+      "podcaster-guest-insight",
+      "weekly-timetable"
     ]);
     const isIntegrationWorkflow = integrationWorkflowSlugs.has(workflow.slug);
+
+    const isTimetableWorkflow = workflow.slug === "weekly-timetable";
+
+    const canSavePodcasterToDocs = workflow.slug === "podcaster-guest-insight" && integrations.docs;
+    const canSaveWeeklyToDocs = isTimetableWorkflow && integrations.docs;
+    const canSendWeeklyByEmail = isTimetableWorkflow && integrations.gmail;
+    const canSaveTuitionToDocs = workflow.slug === "tuition-timetable" && integrations.docs;
+
+    const buildWorkflowPrompt = () => {
+      let finalPrompt = workflow.promptTemplate;
+      Object.entries(values).forEach(([k, v]) => {
+        finalPrompt = finalPrompt.replace(`{{${k}}}`, (v || "").trim());
+      });
+      return finalPrompt;
+    };
 
     const handleGenerate = async () => {
       if (!isValid || isExecutingWorkflow) return;
@@ -1298,13 +1772,359 @@ function App() {
         return;
       }
 
+      if (workflow.slug === "hr-release") {
+        if (!isUltraUser) {
+          navigate("/pricing");
+          return;
+        }
 
-      let finalPrompt = workflow.promptTemplate;
-      Object.entries(values).forEach(([k, v]) => {
-        finalPrompt = finalPrompt.replace(`{{${k}}}`, (v || "").trim());
-      });
+        try {
+          const res = await fetch("/api/workflows/hr-release/start", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-user-id": user?.id || ""
+            },
+            body: JSON.stringify({
+              employee_name: values.employee_name || "",
+              employee_email: values.employee_email || "",
+              last_working_day: values.last_working_day || "",
+              reason: values.reason || "",
+              final_settlement: values.final_settlement || "",
+              hr_manager_name: values.hr_manager_name || ""
+            })
+          });
+
+          const data = await res.json();
+
+          if (!res.ok) {
+            console.error(data.error || "Failed to start HR Release workflow");
+            return;
+          }
+
+          navigate("/search", {
+            state: {
+              prefillPrompt: data.summary || "Summarize my HR release email activity",
+              autoRunMode: "ai"
+            }
+          });
+        } catch (err) {
+          console.error("Failed to start HR Release automation", err);
+        }
+
+        return;
+      }
+
+      if (workflow.slug === "experience-letter") {
+        if (!isUltraUser) {
+          navigate("/pricing");
+          return;
+        }
+
+        try {
+          const res = await fetch("/api/workflows/experience-letter/start", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-user-id": user?.id || ""
+            },
+            body: JSON.stringify({
+              employee_name: values.employee_name || "",
+              designation: values.designation || "",
+              department: values.department || "",
+              joining_date: values.joining_date || "",
+              leaving_date: values.leaving_date || "",
+              manager_name: values.manager_name || "",
+              company_name: values.company_name || "",
+              authorized_signatory_name: values.authorized_signatory_name || "",
+              authorized_signatory_title: values.authorized_signatory_title || ""
+            })
+          });
+
+          const data = await res.json();
+
+          if (!res.ok) {
+            console.error(data.error || "Failed to start Experience Letter workflow");
+            return;
+          }
+
+          await downloadExperienceLetterPdf({
+            employeeName: values.employee_name || "Employee",
+            companyName: values.company_name || "Company",
+            issueDate: data.issueDate,
+            paragraphs: data.paragraphs || [],
+            signatoryName: values.authorized_signatory_name || data.signatoryName || "Authorized Signatory",
+            signatoryTitle: values.authorized_signatory_title || data.signatoryTitle || "HR Manager",
+            letterheadUrl: (values.company_letterhead_url || "").trim(),
+            signatureUrl: (values.signature_image_url || "").trim()
+          });
+          showToast("Experience letter PDF downloaded. Review and sign before issuing.", "success");
+        } catch (err) {
+          console.error("Failed to start Experience Letter automation", err);
+          showToast("Failed to generate experience letter PDF", "error");
+        }
+
+        return;
+      }
+
+      if (isTimetableWorkflow) {
+        showToast("Use the buttons below: Generate + Save in Docs or Generate + Send Email.", "info");
+        return;
+      }
+
+
+      const finalPrompt = buildWorkflowPrompt();
+
+      if (workflow.slug === "podcaster-guest-insight") {
+        navigate("/search", {
+          state: {
+            prefillPrompt: finalPrompt,
+            autoRunMode: "ai"
+          }
+        });
+        return;
+      }
+
+      if (workflow.slug === "tuition-timetable") {
+        navigate("/search", {
+          state: {
+            prefillPrompt: finalPrompt,
+            autoRunMode: "ai"
+          }
+        });
+        return;
+      }
 
       navigate("/search", { state: { prefillPrompt: finalPrompt } });
+      } finally {
+        setIsExecutingWorkflow(false);
+      }
+    };
+
+    const handleGenerateAndSavePodcasterDoc = async () => {
+      if (workflow.slug !== "podcaster-guest-insight" || !isValid || isExecutingWorkflow) return;
+
+      if (!isUltraUser) {
+        navigate("/pricing");
+        return;
+      }
+
+      if (!integrations.docs) {
+        showToast("Please connect Google Docs first.", "error");
+        return;
+      }
+
+      setIsExecutingWorkflow(true);
+      try {
+        const finalPrompt = buildWorkflowPrompt();
+
+        const res = await fetch("/api/workflows/podcaster-guest-insight/start", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-user-id": user?.id || ""
+          },
+          body: JSON.stringify({
+            prompt: finalPrompt,
+            guest_name: values.guest_name || "",
+            episode_theme: values.episode_theme || ""
+          })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          showToast(data.error || "Failed to generate and save podcast questions", "error");
+          return;
+        }
+
+        if (data.docUrl) {
+          window.open(data.docUrl, "_blank");
+        }
+
+        showToast("Full interview plan saved to Google Docs.", "success");
+
+        navigate("/search", {
+          state: {
+            prefillPrompt: finalPrompt,
+            autoRunMode: "ai"
+          }
+        });
+      } catch (err) {
+        console.error("Failed to create podcaster doc", err);
+        showToast("Failed to save interview plan to Google Docs", "error");
+      } finally {
+        setIsExecutingWorkflow(false);
+      }
+    };
+
+    const handleGenerateAndSaveWeeklyDoc = async () => {
+      if (!isTimetableWorkflow || !isValid || isExecutingWorkflow) return;
+
+      if (!isUltraUser) {
+        navigate("/pricing");
+        return;
+      }
+
+      if (!integrations.docs) {
+        showToast("Please connect Google Docs first.", "error");
+        return;
+      }
+
+      setIsExecutingWorkflow(true);
+      try {
+        const finalPrompt = buildWorkflowPrompt();
+        const res = await fetch("/api/workflows/weekly-timetable/save-doc", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-user-id": user?.id || ""
+          },
+          body: JSON.stringify({
+            prompt: finalPrompt,
+            class_name: values.class_name || ""
+          })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          const errorMessage = [data.error, data.details, data.activationUrl]
+            .filter(Boolean)
+            .join(" ");
+          showToast(errorMessage || "Failed to save timetable in Google Docs", "error");
+          return;
+        }
+
+        if (data.docUrl) {
+          window.open(data.docUrl, "_blank");
+        }
+
+        showToast("Weekly timetable saved to Google Docs.", "success");
+
+        navigate("/search", {
+          state: {
+            prefillPrompt: data.summary || finalPrompt,
+            autoRunMode: "ai"
+          }
+        });
+      } catch (err) {
+        console.error("Failed to save weekly timetable doc", err);
+        showToast("Failed to generate and save timetable doc", "error");
+      } finally {
+        setIsExecutingWorkflow(false);
+      }
+    };
+
+    const handleGenerateAndSaveTuitionDoc = async () => {
+      if (workflow.slug !== "tuition-timetable" || !isValid || isExecutingWorkflow) return;
+
+      if (!isUltraUser) {
+        navigate("/pricing");
+        return;
+      }
+
+      if (!integrations.docs) {
+        showToast("Please connect Google Docs first.", "error");
+        return;
+      }
+
+      setIsExecutingWorkflow(true);
+      try {
+        const finalPrompt = buildWorkflowPrompt();
+
+        const res = await fetch("/api/workflows/tuition-timetable/save-doc", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-user-id": user?.id || ""
+          },
+          body: JSON.stringify({
+            prompt: finalPrompt,
+            class_name: values.class_name || ""
+          })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          const errorMessage = [data.error, data.details, data.activationUrl].filter(Boolean).join(" ");
+          showToast(errorMessage || "Failed to save timetable in Google Docs", "error");
+          return;
+        }
+
+        if (data.docUrl) {
+          window.open(data.docUrl, "_blank");
+        }
+
+        showToast("Tuition timetable saved to Google Docs.", "success");
+
+        navigate("/search", {
+          state: {
+            prefillPrompt: data.summary || finalPrompt,
+            autoRunMode: "ai"
+          }
+        });
+      } catch (err) {
+        console.error("Failed to save tuition timetable doc", err);
+        showToast("Failed to generate and save timetable doc", "error");
+      } finally {
+        setIsExecutingWorkflow(false);
+      }
+    };
+
+    const handleGenerateAndSendWeeklyEmail = async () => {
+      if (!isTimetableWorkflow || !isValid || isExecutingWorkflow) return;
+
+      if (!isUltraUser) {
+        navigate("/pricing");
+        return;
+      }
+
+      if (!integrations.gmail) {
+        showToast("Please connect Gmail first.", "error");
+        return;
+      }
+
+      if (!(values.recipient_emails?.trim?.() || "").length) {
+        showToast("Please enter at least one recipient email.", "error");
+        return;
+      }
+
+      setIsExecutingWorkflow(true);
+      try {
+        const finalPrompt = buildWorkflowPrompt();
+        const res = await fetch("/api/workflows/weekly-timetable/send-email", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-user-id": user?.id || ""
+          },
+          body: JSON.stringify({
+            prompt: finalPrompt,
+            class_name: values.class_name || "",
+            recipient_emails: values.recipient_emails || ""
+          })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          showToast(data.error || "Failed to send weekly timetable emails", "error");
+          return;
+        }
+
+        showToast(`Weekly timetable email sent to ${data.recipientsSent || 0} recipient(s).`, "success");
+
+        navigate("/search", {
+          state: {
+            prefillPrompt: data.summary || finalPrompt,
+            autoRunMode: "ai"
+          }
+        });
+      } catch (err) {
+        console.error("Failed to send weekly timetable email", err);
+        showToast("Failed to generate and send weekly timetable email", "error");
       } finally {
         setIsExecutingWorkflow(false);
       }
@@ -1358,14 +2178,30 @@ function App() {
                   </label>
                     );
                   })()}
-                  <input
-                    type="text"
-                    value={values[field.key] || ""}
-                    onChange={(e) => handleChange(field.key, e.target.value)}
-                    placeholder={field.placeholder}
-                    className="w-full px-5 py-4 text-lg border border-gray-300 dark:border-gray-600 rounded-2xl focus:outline-none focus:border-gray-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                    onKeyDown={(e) => e.key === "Enter" && isValid && handleGenerate()}
-                  />
+                  {field.multiline ? (
+                    <textarea
+                      value={values[field.key] || ""}
+                      onChange={(e) => handleChange(field.key, e.target.value)}
+                      placeholder={field.placeholder}
+                      rows={field.rows || 4}
+                      className="w-full px-5 py-4 text-lg border border-gray-300 dark:border-gray-600 rounded-2xl focus:outline-none focus:border-gray-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white resize-y"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && isValid) {
+                          e.preventDefault();
+                          handleGenerate();
+                        }
+                      }}
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      value={values[field.key] || ""}
+                      onChange={(e) => handleChange(field.key, e.target.value)}
+                      placeholder={field.placeholder}
+                      className="w-full px-5 py-4 text-lg border border-gray-300 dark:border-gray-600 rounded-2xl focus:outline-none focus:border-gray-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                      onKeyDown={(e) => e.key === "Enter" && isValid && handleGenerate()}
+                    />
+                  )}
 
                   {workflow.slug === "pitch-emails" && field.key === "sheet_url" && (
                     <div className="mt-3 flex flex-wrap gap-3">
@@ -1478,31 +2314,45 @@ function App() {
             {workflow.slug === "pitch-emails" && (
               <div className="mt-6 rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-4">
                 <div className="flex flex-wrap gap-3 mb-3">
-                  <button
-                    type="button"
-                    onClick={() => integrations.sheets ? disconnectGoogleTool("sheets") : connectGoogleTool("sheets")}
-                    className={`px-4 py-2 rounded-xl text-sm font-medium transition ${
-                      integrations.sheets
-                        ? "bg-gray-700 text-white hover:bg-gray-800"
-                        : "bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200"
-                    }`}
-                  >
-                    {integrations.sheets ? "Sheets Connected ✓" : "Connect Google Sheets"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => integrations.docs ? disconnectGoogleTool("docs") : connectGoogleTool("docs")}
-                    className={`px-4 py-2 rounded-xl text-sm font-medium transition ${
-                      integrations.docs
-                        ? "bg-gray-700 text-white hover:bg-gray-800"
-                        : "bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200"
-                    }`}
-                  >
-                    {integrations.docs ? "Docs Connected ✓" : "Connect Google Docs"}
-                  </button>
+                  {!isUltraUser ? (
+                    <button
+                      type="button"
+                      onClick={handleUpgradePlanClick}
+                      className="px-4 py-2 rounded-xl text-sm font-medium bg-gray-500 hover:bg-gray-600 text-white transition"
+                    >
+                      Upgrade Plan
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => integrations.sheets ? disconnectGoogleTool("sheets") : connectGoogleTool("sheets")}
+                        className={`px-4 py-2 rounded-xl text-sm font-medium transition ${
+                          integrations.sheets
+                            ? "bg-gray-700 text-white hover:bg-gray-800"
+                            : "bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200"
+                        }`}
+                      >
+                        {integrations.sheets ? "Sheets Connected ✓" : "Connect Google Sheets"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => integrations.docs ? disconnectGoogleTool("docs") : connectGoogleTool("docs")}
+                        className={`px-4 py-2 rounded-xl text-sm font-medium transition ${
+                          integrations.docs
+                            ? "bg-gray-700 text-white hover:bg-gray-800"
+                            : "bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200"
+                        }`}
+                      >
+                        {integrations.docs ? "Docs Connected ✓" : "Connect Google Docs"}
+                      </button>
+                    </>
+                  )}
                 </div>
                 <p className="text-sm text-gray-600 dark:text-gray-300">
-                  {hasPitchLocalFile
+                  {!isUltraUser
+                    ? "Pitch Emails is available on the ULTRA plan. Upgrade to continue."
+                    : hasPitchLocalFile
                     ? "Local file mode needs Google Docs connection only."
                     : "Google Sheet URL mode needs both Google Sheets and Google Docs connected."}
                 </p>
@@ -1516,6 +2366,118 @@ function App() {
                     Execute can still be tried, but backend may ask you to reconnect missing integrations: {pitchEmailsMissingRequirements.join(" • ")}
                   </p>
                 )}
+              </div>
+            )}
+
+            {workflow.slug === "podcaster-guest-insight" && (
+              <div className="mt-6 rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-4">
+                <div className="flex flex-wrap gap-3 mb-3">
+                  {!isUltraUser ? (
+                    <button
+                      type="button"
+                      onClick={handleUpgradePlanClick}
+                      className="px-4 py-2 rounded-xl text-sm font-medium bg-gray-500 hover:bg-gray-600 text-white transition"
+                    >
+                      Upgrade Plan
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => integrations.docs ? disconnectGoogleTool("docs") : connectGoogleTool("docs")}
+                      className={`px-4 py-2 rounded-xl text-sm font-medium transition ${
+                        integrations.docs
+                          ? "bg-gray-700 text-white hover:bg-gray-800"
+                          : "bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200"
+                      }`}
+                    >
+                      {integrations.docs ? "Docs Connected ✓" : "Connect Google Docs"}
+                    </button>
+                  )}
+                </div>
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                  {!isUltraUser
+                    ? "Podcaster workflow is available on the ULTRA plan. Upgrade to continue."
+                    : "Connect Google Docs and click the button below to generate the full 20-question interview plan and save the complete output in a Google Doc."}
+                </p>
+              </div>
+            )}
+
+            {isTimetableWorkflow && (
+              <div className="mt-6 rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-4">
+                <div className="flex flex-wrap gap-3 mb-3">
+                  {!isUltraUser ? (
+                    <button
+                      type="button"
+                      onClick={handleUpgradePlanClick}
+                      className="px-4 py-2 rounded-xl text-sm font-medium bg-gray-500 hover:bg-gray-600 text-white transition"
+                    >
+                      Upgrade Plan
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => integrations.docs ? disconnectGoogleTool("docs") : connectGoogleTool("docs")}
+                        className={`px-4 py-2 rounded-xl text-sm font-medium transition ${
+                          integrations.docs
+                            ? "bg-gray-700 text-white hover:bg-gray-800"
+                            : "bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200"
+                        }`}
+                      >
+                        {integrations.docs ? "Docs Connected ✓" : "Connect Google Docs"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => integrations.gmail ? disconnectGoogleTool("gmail") : connectGoogleTool("gmail")}
+                        className={`px-4 py-2 rounded-xl text-sm font-medium transition ${
+                          integrations.gmail
+                            ? "bg-gray-700 text-white hover:bg-gray-800"
+                            : "bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200"
+                        }`}
+                      >
+                        {integrations.gmail ? "Gmail Connected ✓" : "Connect Gmail"}
+                      </button>
+                    </>
+                  )}
+                </div>
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                  {!isUltraUser
+                    ? "Timetable automation is available on the ULTRA plan. Upgrade to continue."
+                    : "Use separate actions below: Generate + Save in Docs, and Generate + Send Email."}
+                </p>
+              </div>
+            )}
+
+            {workflow.slug === "tuition-timetable" && (
+              <div className="mt-6 rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-4">
+                <div className="flex flex-wrap gap-3 mb-3">
+                  {!isUltraUser ? (
+                    <button
+                      type="button"
+                      onClick={handleUpgradePlanClick}
+                      className="px-4 py-2 rounded-xl text-sm font-medium bg-gray-500 hover:bg-gray-600 text-white transition"
+                    >
+                      Upgrade Plan
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => integrations.docs ? disconnectGoogleTool("docs") : connectGoogleTool("docs")}
+                      className={`px-4 py-2 rounded-xl text-sm font-medium transition ${
+                        integrations.docs
+                          ? "bg-gray-700 text-white hover:bg-gray-800"
+                          : "bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200"
+                      }`}
+                    >
+                      {integrations.docs ? "Docs Connected ✓" : "Connect Google Docs"}
+                    </button>
+                  )}
+                </div>
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                  {!isUltraUser
+                    ? "Tuition Timetable automation is available on the ULTRA plan. Upgrade to continue."
+                    : "Connect Google Docs to save the generated timetable directly to a Google Doc."}
+                </p>
               </div>
             )}
 
@@ -1585,28 +2547,148 @@ function App() {
               </div>
             )}
 
-            <button
-              type="button"
-              onClick={handleGenerate}
-              disabled={!isValid || isExecutingWorkflow}
-              className={`mt-8 w-full py-4 rounded-2xl font-semibold text-lg transition-all ${
-                isValid && !isExecutingWorkflow
-                  ? "bg-gray-700 hover:bg-gray-800 text-white"
-                  : "bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed"
-              }`}
-            >
-              {isExecutingWorkflow ? (
-                <span className="inline-flex items-center gap-3">
-                  <span className="workflow-orb-loader" aria-hidden="true">
-                    <span />
-                    <span />
-                    <span />
-                    <span />
+            {workflow.slug === "hr-release" && (
+              <div className="mt-6 rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-4">
+                <div className="flex flex-wrap gap-3 mb-3">
+                  {!isUltraUser ? (
+                    <button
+                      type="button"
+                      onClick={handleUpgradePlanClick}
+                      className="px-4 py-2 rounded-xl text-sm font-medium bg-gray-500 hover:bg-gray-600 text-white transition"
+                    >
+                      Upgrade Plan
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => integrations.gmail ? disconnectGoogleTool("gmail") : connectGoogleTool("gmail")}
+                      className={`px-4 py-2 rounded-xl text-sm font-medium transition ${
+                        integrations.gmail
+                          ? "bg-gray-700 text-white hover:bg-gray-800"
+                          : "bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200"
+                      }`}
+                    >
+                      {integrations.gmail ? "Gmail Connected ✓" : "Connect Gmail"}
+                    </button>
+                  )}
+                </div>
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                  {!isUltraUser
+                    ? "HR Release is available on the ULTRA plan. Upgrade to continue."
+                    : "HR Release execute flow sends the offboarding email through your connected Gmail account to the employee."}
+                </p>
+              </div>
+            )}
+
+            {workflow.slug === "experience-letter" && (
+              <div className="mt-6 rounded-2xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/40 p-4">
+                <div className="flex flex-wrap gap-3 mb-3">
+                  {!isUltraUser ? (
+                    <button
+                      type="button"
+                      onClick={handleUpgradePlanClick}
+                      className="px-4 py-2 rounded-xl text-sm font-medium bg-gray-500 hover:bg-gray-600 text-white transition"
+                    >
+                      Upgrade Plan
+                    </button>
+                  ) : null}
+                </div>
+                <p className="text-sm text-gray-600 dark:text-gray-300">
+                  {!isUltraUser
+                    ? "Experience Letter generation is available on the ULTRA plan. Upgrade to continue."
+                    : "Generate a PDF draft with optional company letterhead and e-signature. Manual review, authorization, and final sign-off are still required."}
+                </p>
+              </div>
+            )}
+
+            {!isTimetableWorkflow && (
+              <button
+                type="button"
+                onClick={handleGenerate}
+                disabled={!isValid || isExecutingWorkflow}
+                className={`mt-8 w-full py-4 rounded-2xl font-semibold text-lg transition-all ${
+                  isValid && !isExecutingWorkflow
+                    ? "bg-gray-700 hover:bg-gray-800 text-white"
+                    : "bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed"
+                }`}
+              >
+                {isExecutingWorkflow ? (
+                  <span className="inline-flex items-center gap-3">
+                    <span className="workflow-orb-loader" aria-hidden="true">
+                      <span />
+                      <span />
+                      <span />
+                      <span />
+                    </span>
+                    Executing Task...
                   </span>
-                  Executing Task...
-                </span>
-              ) : isIntegrationWorkflow ? "Execute Task" : "Generate Query & Go to Search →"}
-            </button>
+                ) : workflow.slug === "experience-letter"
+                  ? "Generate PDF Draft"
+                  : workflow.slug === "podcaster-guest-insight"
+                    ? "Generate in AI Search"
+                    : isIntegrationWorkflow ? "Execute Task" : "Generate Query & Go to Search →"}
+              </button>
+            )}
+
+            {workflow.slug === "podcaster-guest-insight" && (
+              <button
+                type="button"
+                onClick={handleGenerateAndSavePodcasterDoc}
+                disabled={!isValid || isExecutingWorkflow || !canSavePodcasterToDocs}
+                className={`mt-4 w-full py-4 rounded-2xl font-semibold text-lg transition-all ${
+                  isValid && !isExecutingWorkflow && canSavePodcasterToDocs
+                    ? "bg-gray-900 hover:bg-black text-white"
+                    : "bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed"
+                }`}
+              >
+                {isExecutingWorkflow ? "Generating and Saving..." : "Generate + Save to Google Docs"}
+              </button>
+            )}
+
+            {workflow.slug === "tuition-timetable" && (
+              <button
+                type="button"
+                onClick={handleGenerateAndSaveTuitionDoc}
+                disabled={!isValid || isExecutingWorkflow || !canSaveTuitionToDocs || !isUltraUser}
+                className={`mt-4 w-full py-4 rounded-2xl font-semibold text-lg transition-all ${
+                  isValid && !isExecutingWorkflow && canSaveTuitionToDocs && isUltraUser
+                    ? "bg-gray-900 hover:bg-black text-white"
+                    : "bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed"
+                }`}
+              >
+                {isExecutingWorkflow ? "Generating and Saving..." : "Generate + Save in Google Docs"}
+              </button>
+            )}
+
+            {isTimetableWorkflow && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleGenerateAndSaveWeeklyDoc}
+                  disabled={!isValid || isExecutingWorkflow || !canSaveWeeklyToDocs || !isUltraUser}
+                  className={`mt-8 w-full py-4 rounded-2xl font-semibold text-lg transition-all ${
+                    isValid && !isExecutingWorkflow && canSaveWeeklyToDocs && isUltraUser
+                      ? "bg-gray-900 hover:bg-black text-white"
+                      : "bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed"
+                  }`}
+                >
+                  {isExecutingWorkflow ? "Generating and Saving..." : "Generate + Save in Google Docs"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleGenerateAndSendWeeklyEmail}
+                  disabled={!isValid || isExecutingWorkflow || !canSendWeeklyByEmail || !isUltraUser || !((values.recipient_emails?.trim?.() || "").length > 0)}
+                  className={`mt-4 w-full py-4 rounded-2xl font-semibold text-lg transition-all ${
+                    isValid && !isExecutingWorkflow && canSendWeeklyByEmail && isUltraUser && (values.recipient_emails?.trim?.() || "").length > 0
+                      ? "bg-gray-700 hover:bg-gray-800 text-white"
+                      : "bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed"
+                  }`}
+                >
+                  {isExecutingWorkflow ? "Generating and Sending..." : "Generate + Send Email"}
+                </button>
+              </>
+            )}
 
             {(workflow.embedUrl || workflow.videoSrc) && (
               <div className="mt-8 overflow-hidden rounded-2xl border border-gray-200 dark:border-gray-700 bg-black shadow-sm">
@@ -1709,7 +2791,7 @@ function App() {
               .map((card, index) => (
                 <div
                   key={index}
-                  onClick={() => navigate(`/workflow-input/${card.slug}`)}
+                  onClick={(e) => handleWorkflowCardClick(e, card.slug)}
                   className="bg-white dark:bg-gray-800 rounded-3xl p-6 sm:p-8 shadow-lg hover:shadow-2xl transition-all duration-300 cursor-pointer border border-gray-100 dark:border-gray-700 hover:border-gray-400 dark:hover:border-gray-500 group"
                 >
                   <h3 className="text-xl sm:text-2xl font-semibold mb-4 text-gray-900 dark:text-white group-hover:text-gray-700 dark:group-hover:text-gray-300">
@@ -1798,6 +2880,112 @@ function App() {
                     >
                       {!isUltraUser ? "Upgrade Plan" : integrations.docs ? "Connected ✓ (click to disconnect)" : "Connect Docs"}
                     </button>
+                  )}
+
+                  {card.slug === "podcaster-guest-insight" && (
+                    !isUltraUser ? (
+                      <button
+                        onClick={handleUpgradePlanClick}
+                        className="mt-2 px-4 py-2 rounded-lg text-sm bg-gray-500 hover:bg-gray-600 text-white cursor-pointer transition block mx-auto"
+                      >
+                        Upgrade Plan
+                      </button>
+                    ) : (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (integrations.docs) {
+                            disconnectGoogleTool("docs");
+                          } else {
+                            connectGoogleTool("docs");
+                          }
+                        }}
+                        className={`mt-2 px-4 py-2 rounded-lg text-sm cursor-pointer transition ${
+                          integrations.docs
+                            ? "bg-gray-600 hover:bg-gray-700 text-white"
+                            : "bg-gray-500 hover:bg-gray-600 text-white block mx-auto"
+                        }`}
+                      >
+                        {integrations.docs ? "Connected ✓ (click to disconnect)" : "Connect Docs"}
+                      </button>
+                    )
+                  )}
+
+                  {card.slug === "weekly-timetable" && (
+                    !isUltraUser ? (
+                      <button
+                        onClick={handleUpgradePlanClick}
+                        className="mt-2 px-4 py-2 rounded-lg text-sm bg-gray-500 hover:bg-gray-600 text-white cursor-pointer transition block mx-auto"
+                      >
+                        Upgrade Plan
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (integrations.docs) {
+                              disconnectGoogleTool("docs");
+                            } else {
+                              connectGoogleTool("docs");
+                            }
+                          }}
+                          className={`mt-2 px-4 py-2 rounded-lg text-sm cursor-pointer transition ${
+                            integrations.docs
+                              ? "bg-gray-600 hover:bg-gray-700"
+                              : "bg-gray-500 hover:bg-gray-600"
+                          }`}
+                        >
+                          {integrations.docs ? "Docs Connected ✓ (click to disconnect)" : "Connect Docs"}
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (integrations.gmail) {
+                              disconnectGoogleTool("gmail");
+                            } else {
+                              connectGoogleTool("gmail");
+                            }
+                          }}
+                          className={`mt-2 ml-2 px-4 py-2 rounded-lg text-sm cursor-pointer transition ${
+                            integrations.gmail
+                              ? "bg-gray-600 hover:bg-gray-700"
+                              : "bg-gray-500 hover:bg-gray-600"
+                          }`}
+                        >
+                          {integrations.gmail ? "Gmail Connected ✓ (click to disconnect)" : "Connect Gmail"}
+                        </button>
+                      </>
+                    )
+                  )}
+
+                  {card.slug === "tuition-timetable" && (
+                    !isUltraUser ? (
+                      <button
+                        onClick={handleUpgradePlanClick}
+                        className="mt-2 px-4 py-2 rounded-lg text-sm bg-gray-500 hover:bg-gray-600 text-white cursor-pointer transition block mx-auto"
+                      >
+                        Upgrade Plan
+                      </button>
+                    ) : (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (integrations.docs) {
+                            disconnectGoogleTool("docs");
+                          } else {
+                            connectGoogleTool("docs");
+                          }
+                        }}
+                        className={`mt-2 px-4 py-2 rounded-lg text-sm cursor-pointer transition ${
+                          integrations.docs
+                            ? "bg-gray-600 hover:bg-gray-700 text-white"
+                            : "bg-gray-500 hover:bg-gray-600 text-white block mx-auto"
+                        }`}
+                      >
+                        {integrations.docs ? "Docs Connected ✓ (click to disconnect)" : "Connect Docs"}
+                      </button>
+                    )
                   )}
 
                   {card.slug === "pitch-emails" && (
@@ -1953,6 +3141,50 @@ function App() {
                       >
                         {integrations.gmail ? "Gmail Connected ✓ (click to disconnect)" : "Connect Gmail"}
                       </button>
+                    )
+                  )}
+
+                  {card.slug === "hr-release" && (
+                    !isUltraUser ? (
+                      <button
+                        onClick={handleUpgradePlanClick}
+                        className="mt-2 px-4 py-2 rounded-lg text-sm bg-gray-500 hover:bg-gray-600 text-white cursor-pointer transition block mx-auto"
+                      >
+                        Upgrade Plan
+                      </button>
+                    ) : (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (integrations.gmail) {
+                            disconnectGoogleTool("gmail");
+                          } else {
+                            connectGoogleTool("gmail");
+                          }
+                        }}
+                        className={`mt-2 px-4 py-2 rounded-lg text-sm cursor-pointer transition ${
+                          integrations.gmail
+                            ? "bg-gray-600 hover:bg-gray-700"
+                            : "bg-gray-500 hover:bg-gray-600"
+                        }`}
+                      >
+                        {integrations.gmail ? "Gmail Connected ✓ (click to disconnect)" : "Connect Gmail"}
+                      </button>
+                    )
+                  )}
+
+                  {card.slug === "experience-letter" && (
+                    !isUltraUser ? (
+                      <button
+                        onClick={handleUpgradePlanClick}
+                        className="mt-2 px-4 py-2 rounded-lg text-sm bg-gray-500 hover:bg-gray-600 text-white cursor-pointer transition block mx-auto"
+                      >
+                        Upgrade Plan
+                      </button>
+                    ) : (
+                      <div className="mt-2 text-xs text-gray-500 italic">
+                        ⚠️ Requires manual review & authorization
+                      </div>
                     )
                   )}
 
@@ -2333,6 +3565,8 @@ function App() {
   }
 
   const queryParam = new URLSearchParams(location.search).get("query");
+  const activeSearchQuery = queryParam || prompt;
+  const tabImages = mode === "ai" ? imageResults : (Array.isArray(response?.images) ? response.images : []);
 
   return (
     <div className="searchpage min-h-screen">
@@ -2464,9 +3698,9 @@ function App() {
 
           {error && <p className="text-red-500 mt-6 text-center">{error}</p>}
 
-          {response && mode === "search" && (
+          {response && (mode === "search" || mode === "ai") && (
             <div className="answer-container w-full">
-              {queryParam && shouldShowHeading(response.text) && (
+              {queryParam && shouldShowHeading(mode === "ai" ? response.text : response.summary) && (
                 <h2 className="text-2xl font-semibold text-center mb-5">
                   {decodeURIComponent(queryParam)}
                 </h2>
@@ -2475,17 +3709,68 @@ function App() {
                 <button className={`tab ${activeTab === "answer" ? "active" : ""}`} onClick={() => showTab("answer")}>
                   Answer
                 </button>
+                <button className={`tab ${activeTab === "images" ? "active" : ""}`} onClick={() => showTab("images")}>
+                  Images
+                </button>
+                <button
+                  className={`tab ${activeTab === "videos" ? "active" : ""}`}
+                  onClick={() => showTab("videos")}
+                  disabled={!activeSearchQuery || videosLoading}
+                >
+                  Videos
+                </button>
+                <button
+                  className={`tab ${activeTab === "short-videos" ? "active" : ""}`}
+                  onClick={() => showTab("short-videos")}
+                  disabled={!activeSearchQuery || shortVideosLoading}
+                >
+                  Short Videos
+                </button>
+                <button
+                  className={`tab ${activeTab === "news" ? "active" : ""}`}
+                  onClick={() => showTab("news")}
+                  disabled={!activeSearchQuery || newsLoading}
+                >
+                  News
+                </button>
                 <button className={`tab ${activeTab === "sources" ? "active" : ""}`} onClick={() => showTab("sources")}>
                   Sources
                 </button>
               </div>
               <div className="content">
                 <div className={`content-section ${activeTab === "answer" ? "block" : "hidden"}`}>
+                  {tabImages.length > 0 && (
+                    <div className="search-images-section">
+                      <div className="search-images-grid">
+                        {tabImages.map((imgUrl, i) => (
+                          <a
+                            key={`${imgUrl}-${i}`}
+                            href={imgUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="search-image-card"
+                          >
+                            <img
+                              src={imgUrl}
+                              alt={`Search visual ${i + 1}`}
+                              loading="lazy"
+                              onError={(e) => {
+                                e.currentTarget.style.display = "none";
+                              }}
+                            />
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                   <div
                     className="ai-response-body"
                     dangerouslySetInnerHTML={{
                       __html: DOMPurify.sanitize(
-                        makeCitationsClickable(renderMarkdown(response.summary || "No answer available"), response.citations || []),
+                        makeCitationsClickable(
+                          renderMarkdown(mode === "ai" ? (response.text || "No response available") : (response.summary || "No answer available")),
+                          response.citations || []
+                        ),
                         { ADD_ATTR: ["target", "rel"] }
                       ),
                     }}
@@ -2502,6 +3787,141 @@ function App() {
                         ))}
                       </div>
                     </div>
+                  )}
+                </div>
+                <div className={`content-section ${activeTab === "images" ? "block" : "hidden"}`}>
+                  {imagesLoading ? (
+                    <div style={{ textAlign: "center", padding: "2rem" }}>
+                      <p style={{ color: "var(--text-secondary)" }}>Loading images...</p>
+                    </div>
+                  ) : tabImages.length > 0 ? (
+                    <div className="search-images-section">
+                      <div className="search-images-grid">
+                        {tabImages.map((imgUrl, i) => (
+                          <a
+                            key={`${imgUrl}-${i}`}
+                            href={imgUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="search-image-card"
+                          >
+                            <img
+                              src={imgUrl}
+                              alt={`Search visual ${i + 1}`}
+                              loading="lazy"
+                              onError={(e) => {
+                                e.currentTarget.style.display = "none";
+                              }}
+                            />
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="sources-empty">Click the Images tab to load visuals for this response.</p>
+                  )}
+                </div>
+                <div className={`content-section ${activeTab === "videos" ? "block" : "hidden"}`}>
+                  {videosLoading ? (
+                    <div style={{ textAlign: "center", padding: "2rem" }}>
+                      <p style={{ color: "var(--text-secondary)" }}>Loading videos...</p>
+                    </div>
+                  ) : videoResults.length > 0 ? (
+                    <div className="google-videos-container">
+                      {videoResults.map((video, i) => (
+                        <a
+                          key={`${video.videoId}-${i}`}
+                          href={video.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="google-video-result"
+                        >
+                          <div className="google-video-thumbnail">
+                            <img
+                              src={video.thumbnail}
+                              alt={video.title}
+                              loading="lazy"
+                              onError={(e) => {
+                                e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 180'%3E%3Crect fill='%23202020' width='320' height='180'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%23666' font-size='14'%3EVideo%3C/text%3E%3C/svg%3E";
+                              }}
+                            />
+                            <div className="video-duration">{video.duration}</div>
+                            <div className="video-play-icon">▶</div>
+                          </div>
+                          <div className="google-video-info">
+                            <h3 className="google-video-title">{video.title}</h3>
+                            <p className="google-video-channel">{video.channel}</p>
+                            <p className="google-video-views">{video.views}</p>
+                          </div>
+                        </a>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="sources-empty">Click the Videos tab to see results.</p>
+                  )}
+                </div>
+                <div className={`content-section ${activeTab === "short-videos" ? "block" : "hidden"}`}>
+                  {shortVideosLoading ? (
+                    <div style={{ textAlign: "center", padding: "2rem" }}>
+                      <p style={{ color: "var(--text-secondary)" }}>Loading short videos...</p>
+                    </div>
+                  ) : shortVideoResults.length > 0 ? (
+                    <div className="google-videos-container">
+                      {shortVideoResults.map((video, i) => (
+                        <a
+                          key={`${video.videoId || video.url}-${i}`}
+                          href={video.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="google-video-result"
+                        >
+                          <div className="google-video-thumbnail short-video-thumbnail">
+                            <img
+                              src={video.thumbnail}
+                              alt={video.title}
+                              loading="lazy"
+                              onError={(e) => {
+                                e.currentTarget.src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 180'%3E%3Crect fill='%23202020' width='320' height='180'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%23666' font-size='14'%3EShort%3C/text%3E%3C/svg%3E";
+                              }}
+                            />
+                            <div className="video-duration">{video.duration || "0:30"}</div>
+                            <div className="video-play-icon">▶</div>
+                          </div>
+                          <div className="google-video-info">
+                            <h3 className="google-video-title">{video.title}</h3>
+                            <p className="google-video-channel">{video.channel || "YouTube Shorts"}</p>
+                            <p className="google-video-views">{video.views || "Short video"}</p>
+                          </div>
+                        </a>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="sources-empty">Click the Short Videos tab to see results.</p>
+                  )}
+                </div>
+                <div className={`content-section ${activeTab === "news" ? "block" : "hidden"}`}>
+                  {newsLoading ? (
+                    <div style={{ textAlign: "center", padding: "2rem" }}>
+                      <p style={{ color: "var(--text-secondary)" }}>Loading news...</p>
+                    </div>
+                  ) : newsResults.length > 0 ? (
+                    <div className="news-results-container">
+                      {newsResults.map((item, i) => (
+                        <a
+                          key={`${item.url}-${i}`}
+                          href={item.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="news-result-card"
+                        >
+                          <p className="news-source">{item.source || "News Source"}</p>
+                          <h3 className="news-title">{item.title}</h3>
+                          <p className="news-snippet">{item.snippet || "Read full story"}</p>
+                        </a>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="sources-empty">Click the News tab to see results.</p>
                   )}
                 </div>
                 <div className={`content-section ${activeTab === "sources" ? "block" : "hidden"}`}>
@@ -2541,37 +3961,6 @@ function App() {
             </div>
           )}
 
-          {response && mode === "ai" && (
-            <div className="response-container w-full">
-              {queryParam && shouldShowHeading(response.summary) && (
-                <h2 className="text-2xl font-semibold text-center mb-5">
-                  {decodeURIComponent(queryParam)}
-                </h2>
-              )}
-              <div
-                className="ai-response-body"
-                dangerouslySetInnerHTML={{
-                  __html: DOMPurify.sanitize(
-                    makeCitationsClickable(renderMarkdown(response.text || "No response available"), []),
-                    { ADD_ATTR: ["target", "rel"] }
-                  ),
-                }}
-              />
-              {response.suggestions?.length > 0 && (
-                <div className="paa-section">
-                  <h3 className="paa-title">People also ask</h3>
-                  <div className="paa-list">
-                    {response.suggestions.map((s, i) => (
-                      <button key={i} className="paa-chip" onClick={() => handleSuggestionClick(s)}>
-                        <span className="paa-icon">&#x1F50D;</span>
-                        <span>{s}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
         </div>
       </div>
     </div>

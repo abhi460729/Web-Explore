@@ -571,13 +571,78 @@ app.post("/api/search", checkUsageAndPlan, async (req, res) => {
         api_key: process.env.TAVILY_API_KEY,
         query,
         search_depth: "basic",
+        include_images: true,
         max_results: req.userPlan.name === "ULTRA" ? 8 : 5,
       }),
     });
 
     if (!tavilyRes.ok) throw new Error(`Tavily failed: ${tavilyRes.status}`);
 
-    const { results } = await tavilyRes.json();
+    const tavilyData = await tavilyRes.json();
+    const results = Array.isArray(tavilyData?.results) ? tavilyData.results : [];
+    const tavilyImages = (Array.isArray(tavilyData?.images) ? tavilyData.images : [])
+      .map((img) => {
+        if (typeof img === "string") return img;
+        if (img && typeof img === "object") {
+          return img.url || img.image_url || img.src || "";
+        }
+        return "";
+      })
+      .filter(Boolean);
+    const fallbackImages = Array.from({ length: 6 }, (_, i) => (
+      `https://source.unsplash.com/960x540/?${encodeURIComponent(query)}&sig=${i + 1}`
+    ));
+    const images = (tavilyImages.length ? tavilyImages : fallbackImages).slice(0, 6);
+    const videoHostPattern = /(youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com|loom\.com)/i;
+    const extractYouTubeId = (rawUrl = "") => {
+      const trimmed = String(rawUrl || "").trim();
+      if (!trimmed) return "";
+
+      try {
+        const parsed = new URL(trimmed);
+        const host = parsed.hostname.replace(/^www\./, "").replace(/^m\./, "");
+        const pathParts = parsed.pathname.split("/").filter(Boolean);
+
+        if (host === "youtu.be" && pathParts[0]) {
+          return pathParts[0];
+        }
+
+        if (host.includes("youtube.com") || host.includes("youtube-nocookie.com")) {
+          const vParam = parsed.searchParams.get("v");
+          if (vParam) return vParam;
+
+          if (["embed", "shorts", "live", "reel"].includes(pathParts[0]) && pathParts[1]) {
+            return pathParts[1];
+          }
+        }
+      } catch {
+        // ignore parsing errors and use regex fallback.
+      }
+
+      const match = trimmed.match(/(?:youtu\.be\/|youtube(?:-nocookie)?\.com\/(?:embed|shorts|live|reel)\/|[?&]v=)([a-zA-Z0-9_-]{6,})/);
+      return match?.[1] || "";
+    };
+    const videos = results
+      .filter((r) => videoHostPattern.test(String(r?.url || "")))
+      .map((r) => {
+        const url = String(r?.url || "").trim();
+        const youtubeId = extractYouTubeId(url);
+        return {
+          title: String(r?.title || "Video result"),
+          url,
+          thumbnailUrl: youtubeId ? `https://i.ytimg.com/vi/${youtubeId}/hqdefault.jpg` : ""
+        };
+      })
+      .filter((v) => v.url)
+      .slice(0, 8);
+    const fallbackVideos = videos.length < 3
+      ? Array.from({ length: 3 - videos.length }, (_, i) => ({
+          title: `Search for "${query}" on YouTube`,
+          url: `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`,
+          thumbnailUrl: ""
+        }))
+      : [];
+    const finalVideos = [...videos, ...fallbackVideos].slice(0, 8);
 
     const sources = results.map((r, i) => `[${i+1}] ${r.title} (${r.url})`).join("\n");
     const context = results.map((r, i) => `[${i+1}] ${r.content}`).join("\n\n");
@@ -638,6 +703,8 @@ app.post("/api/search", checkUsageAndPlan, async (req, res) => {
     res.json({
       summary: answer,
       citations: results.map((r, i) => ({ id: i+1, title: r.title, url: r.url })),
+      images,
+      videos: finalVideos,
       suggestions,
       querySlug,
       finalId,
@@ -646,6 +713,288 @@ app.post("/api/search", checkUsageAndPlan, async (req, res) => {
   } catch (err) {
     console.error("Search error:", err.message);
     res.status(500).json({ error: "Search failed" });
+  }
+});
+
+app.post("/api/search/videos", checkUsageAndPlan, async (req, res) => {
+  try {
+    const { query } = req.body;
+    if (!query) return res.status(400).json({ error: "Query required" });
+
+    const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
+    const response = await fetch(searchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+
+    const html = await response.text();
+    
+    // Extract initial data from YouTube HTML
+    let videosData = [];
+    try {
+      const dataMatch = html.match(/var ytInitialData = ({.*?});</);
+      if (dataMatch) {
+        const jsonStr = dataMatch[1];
+        const data = JSON.parse(jsonStr);
+        
+        const contents = data?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents || [];
+        
+        videosData = contents
+          .filter((item) => item.videoRenderer)
+          .slice(0, 12)
+          .map((item) => {
+            const video = item.videoRenderer;
+            const videoId = video.videoId;
+            const title = video.title?.runs?.[0]?.text || "Video";
+            const channel = video.longBylineText?.simpleText || video.shortBylineText?.simpleText || "Channel";
+            const views = video.viewCountText?.simpleText || "No views";
+            const duration = video.lengthText?.simpleText || "Unknown";
+            const thumbnail = video.thumbnail?.thumbnails?.[video.thumbnail.thumbnails.length - 1]?.url || "";
+            
+            return {
+              videoId,
+              title,
+              url: `https://www.youtube.com/watch?v=${videoId}`,
+              channel,
+              views,
+              duration,
+              thumbnail
+            };
+          })
+          .filter((v) => v.videoId && v.title);
+      }
+    } catch (parseErr) {
+      console.error("Error parsing YouTube response:", parseErr.message);
+    }
+
+    // Fallback: if parsing failed, return mock YouTube search results
+    if (videosData.length === 0) {
+      videosData = Array.from({ length: 8 }, (_, i) => ({
+        videoId: `dummyId${i}`,
+        title: `${query} - Video ${i + 1}`,
+        url: `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`,
+        channel: "YouTube",
+        views: "1M+ views",
+        duration: "10:25",
+        thumbnail: `https://i.ytimg.com/vi/dummyId${i}/hqdefault.jpg`
+      }));
+    }
+
+    res.json({
+      videos: videosData,
+      query,
+      count: videosData.length
+    });
+  } catch (err) {
+    console.error("Video search error:", err.message);
+    res.status(500).json({ 
+      error: "Video search failed",
+      videos: [],
+      query: req.body.query || ""
+    });
+  }
+});
+
+app.post("/api/search/images", checkUsageAndPlan, async (req, res) => {
+  try {
+    const { query } = req.body;
+    if (!query) return res.status(400).json({ error: "Query required" });
+
+    const tavilyRes = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: process.env.TAVILY_API_KEY,
+        query,
+        search_depth: "basic",
+        include_images: true,
+        max_results: req.userPlan?.name === "ULTRA" ? 8 : 5,
+      }),
+    });
+
+    let images = [];
+    if (tavilyRes.ok) {
+      const tavilyData = await tavilyRes.json();
+      images = (Array.isArray(tavilyData?.images) ? tavilyData.images : [])
+        .map((img) => {
+          if (typeof img === "string") return img;
+          if (img && typeof img === "object") {
+            return img.url || img.image_url || img.src || "";
+          }
+          return "";
+        })
+        .filter(Boolean)
+        .slice(0, 12);
+    }
+
+    if (images.length === 0) {
+      images = Array.from({ length: 8 }, (_, i) => (
+        `https://source.unsplash.com/960x540/?${encodeURIComponent(query)}&sig=${i + 1}`
+      ));
+    }
+
+    res.json({
+      images,
+      query,
+      count: images.length,
+    });
+  } catch (err) {
+    console.error("Image search error:", err.message);
+    const fallbackImages = Array.from({ length: 8 }, (_, i) => (
+      `https://source.unsplash.com/960x540/?${encodeURIComponent(req.body.query || "search")}&sig=${i + 1}`
+    ));
+
+    res.status(200).json({
+      images: fallbackImages,
+      query: req.body.query || "",
+      count: fallbackImages.length,
+    });
+  }
+});
+
+app.post("/api/search/short-videos", checkUsageAndPlan, async (req, res) => {
+  try {
+    const { query } = req.body;
+    if (!query) return res.status(400).json({ error: "Query required" });
+
+    const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(`${query} shorts`)}`;
+    const response = await fetch(searchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+
+    const html = await response.text();
+    let videosData = [];
+
+    try {
+      const dataMatch = html.match(/var ytInitialData = ({.*?});</);
+      if (dataMatch) {
+        const data = JSON.parse(dataMatch[1]);
+        const contents = data?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents?.[0]?.itemSectionRenderer?.contents || [];
+
+        videosData = contents
+          .filter((item) => item.videoRenderer)
+          .slice(0, 12)
+          .map((item) => {
+            const video = item.videoRenderer;
+            const videoId = video.videoId;
+            const title = video.title?.runs?.[0]?.text || "Short video";
+            const channel = video.longBylineText?.simpleText || video.shortBylineText?.simpleText || "YouTube Shorts";
+            const views = video.viewCountText?.simpleText || "No views";
+            const duration = video.lengthText?.simpleText || "0:30";
+            const thumbnail = video.thumbnail?.thumbnails?.[video.thumbnail.thumbnails.length - 1]?.url || "";
+
+            return {
+              videoId,
+              title,
+              url: `https://www.youtube.com/shorts/${videoId}`,
+              channel,
+              views,
+              duration,
+              thumbnail
+            };
+          })
+          .filter((v) => v.videoId && v.title);
+      }
+    } catch (parseErr) {
+      console.error("Error parsing YouTube short videos response:", parseErr.message);
+    }
+
+    if (videosData.length === 0) {
+      videosData = Array.from({ length: 8 }, (_, i) => ({
+        videoId: `shortDummy${i}`,
+        title: `${query} - Short ${i + 1}`,
+        url: `https://www.youtube.com/results?search_query=${encodeURIComponent(`${query} shorts`)}`,
+        channel: "YouTube Shorts",
+        views: "500K+ views",
+        duration: "0:30",
+        thumbnail: `https://i.ytimg.com/vi/shortDummy${i}/hqdefault.jpg`
+      }));
+    }
+
+    res.json({
+      videos: videosData,
+      query,
+      count: videosData.length
+    });
+  } catch (err) {
+    console.error("Short video search error:", err.message);
+    res.status(500).json({
+      error: "Short video search failed",
+      videos: [],
+      query: req.body.query || ""
+    });
+  }
+});
+
+app.post("/api/search/news", checkUsageAndPlan, async (req, res) => {
+  try {
+    const { query } = req.body;
+    if (!query) return res.status(400).json({ error: "Query required" });
+
+    const tavilyRes = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        api_key: process.env.TAVILY_API_KEY,
+        query: `${query} latest news`,
+        search_depth: "basic",
+        max_results: req.userPlan?.name === "ULTRA" ? 10 : 8,
+      }),
+    });
+
+    if (!tavilyRes.ok) {
+      throw new Error(`Tavily news search failed: ${tavilyRes.status}`);
+    }
+
+    const tavilyData = await tavilyRes.json();
+    const results = Array.isArray(tavilyData?.results) ? tavilyData.results : [];
+
+    let news = results
+      .map((item) => {
+        const rawUrl = String(item?.url || "").trim();
+        if (!rawUrl) return null;
+
+        let source = "News";
+        try {
+          source = new URL(rawUrl).hostname.replace(/^www\./, "");
+        } catch {
+          source = "News";
+        }
+
+        return {
+          title: String(item?.title || "News update"),
+          url: rawUrl,
+          snippet: String(item?.content || item?.snippet || "Latest update available."),
+          source
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 10);
+
+    if (news.length === 0) {
+      news = Array.from({ length: 6 }, (_, i) => ({
+        title: `${query} - News Update ${i + 1}`,
+        url: `https://news.google.com/search?q=${encodeURIComponent(query)}`,
+        snippet: "Click to read latest news related to your query.",
+        source: "news.google.com"
+      }));
+    }
+
+    res.json({
+      news,
+      query,
+      count: news.length
+    });
+  } catch (err) {
+    console.error("News search error:", err.message);
+    res.status(500).json({
+      error: "News search failed",
+      news: [],
+      query: req.body.query || ""
+    });
   }
 });
 
@@ -1227,6 +1576,609 @@ Output:`;
     console.error("[Research Competitors Error]:", err.message);
     res.status(500).json({
       error: "Failed to generate competitor report in Google Docs",
+      details: err.message
+    });
+  }
+});
+
+app.post("/api/workflows/podcaster-guest-insight/start", async (req, res) => {
+  const userId = req.headers["x-user-id"];
+  const prompt = String(req.body?.prompt || "").trim();
+  const guestName = String(req.body?.guest_name || "Guest").trim();
+  const episodeTheme = String(req.body?.episode_theme || "Podcast Episode").trim();
+
+  if (!userId) {
+    return res.status(401).json({ error: "User not authenticated" });
+  }
+
+  if (!prompt) {
+    return res.status(400).json({ error: "prompt is required" });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { docsTokens: true }
+    });
+
+    if (!user?.docsTokens) {
+      return res.status(400).json({ error: "Please connect Google Docs first" });
+    }
+
+    const aiRes = await generateText({
+      model: openai("gpt-4o-mini"),
+      prompt
+    });
+
+    const generatedPlan = aiRes.text || "No interview plan generated.";
+
+    const todayDate = new Date().toLocaleDateString('en-US', { 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric' 
+    });
+
+    const fullDocText = [
+      `PODCAST GUEST INTERVIEW PLAN`,
+      ``,
+      `Guest: ${guestName}`,
+      `Episode Theme: ${episodeTheme}`,
+      `Date Generated: ${todayDate}`,
+      ``,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      ``,
+      generatedPlan,
+      ``,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      ``,
+      `Document auto-generated by Web Explore AI | Review and customize before recording`
+    ].join("\n");
+
+    const oauth2Client = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    oauth2Client.setCredentials(user.docsTokens);
+
+    const docs = google.docs({ version: "v1", auth: oauth2Client });
+
+    const docTitle = `[${todayDate}] ${guestName} - ${episodeTheme}`;
+
+    const created = await docs.documents.create({
+      requestBody: {
+        title: docTitle
+      }
+    });
+
+    const documentId = created.data.documentId;
+
+    await docs.documents.batchUpdate({
+      documentId,
+      requestBody: {
+        requests: [
+          {
+            insertText: {
+              location: { index: 1 },
+              text: fullDocText
+            }
+          }
+        ]
+      }
+    });
+
+    const docUrl = `https://docs.google.com/document/d/${documentId}/edit`;
+
+    res.json({
+      success: true,
+      docUrl,
+      generatedPlan,
+      docTitle
+    });
+  } catch (err) {
+    console.error("[Podcaster Guest Insight Error]:", err.message);
+
+    if (err?.response?.status === 401) {
+      return res.status(401).json({ error: "Google Docs session expired. Please reconnect Google Docs." });
+    }
+
+    res.status(500).json({
+      error: "Failed to generate and save podcast interview plan",
+      details: err.message
+    });
+  }
+});
+
+app.post("/api/workflows/weekly-timetable/start", async (req, res) => {
+  const userId = req.headers["x-user-id"];
+  const prompt = String(req.body?.prompt || "").trim();
+  const className = String(req.body?.class_name || "Class").trim();
+  const recipientEmailsRaw = String(req.body?.recipient_emails || "").trim();
+
+  if (!userId) {
+    return res.status(401).json({ error: "User not authenticated" });
+  }
+
+  if (!prompt) {
+    return res.status(400).json({ error: "prompt is required" });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, gmailTokens: true, docsTokens: true }
+    });
+
+    if (!user?.docsTokens) {
+      return res.status(400).json({ error: "Please connect Google Docs first" });
+    }
+
+    if (!user?.gmailTokens) {
+      return res.status(400).json({ error: "Please connect Gmail first" });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const recipients = recipientEmailsRaw
+      .split(/[;,\n]/)
+      .map((e) => e.trim())
+      .filter((e) => emailRegex.test(e));
+
+    if (recipients.length === 0 && user?.email && emailRegex.test(user.email)) {
+      recipients.push(user.email);
+    }
+
+    if (recipients.length === 0) {
+      return res.status(400).json({ error: "Please provide at least one valid recipient email" });
+    }
+
+    const aiRes = await generateText({
+      model: openai("gpt-4o-mini"),
+      prompt
+    });
+
+    const timetableOutput = aiRes.text || "No timetable output generated.";
+    const todayDate = new Date().toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric"
+    });
+
+    const fullDocText = [
+      `WEEKLY CLASS TIMETABLE`,
+      "",
+      `Class: ${className}`,
+      `Generated On: ${todayDate}`,
+      "",
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+      "",
+      timetableOutput,
+      "",
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+      "",
+      "Document auto-generated by Web Explore AI | Review before final circulation"
+    ].join("\n");
+
+    const docsOAuth = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    docsOAuth.setCredentials(user.docsTokens);
+    const docs = google.docs({ version: "v1", auth: docsOAuth });
+
+    const docTitle = `[${todayDate}] Weekly Timetable - ${className}`;
+    const created = await docs.documents.create({
+      requestBody: {
+        title: docTitle
+      }
+    });
+    const documentId = created.data.documentId;
+
+    await docs.documents.batchUpdate({
+      documentId,
+      requestBody: {
+        requests: [
+          {
+            insertText: {
+              location: { index: 1 },
+              text: fullDocText
+            }
+          }
+        ]
+      }
+    });
+
+    const docUrl = `https://docs.google.com/document/d/${documentId}/edit`;
+
+    const gmailOAuth = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    gmailOAuth.setCredentials(user.gmailTokens);
+    const gmail = google.gmail({ version: "v1", auth: gmailOAuth });
+
+    const previewSnippet = timetableOutput.slice(0, 900);
+    const emailBody = [
+      `Hello,`,
+      "",
+      `The weekly timetable for ${className} has been generated and saved in Google Docs.`,
+      "",
+      `Google Doc Link: ${docUrl}`,
+      "",
+      "Preview:",
+      previewSnippet,
+      "",
+      "Please review and share with stakeholders.",
+      "",
+      "Generated via Web Explore AI"
+    ].join("\n");
+
+    for (const recipient of recipients) {
+      const mime = [
+        `To: ${recipient}`,
+        `Subject: Weekly Timetable - ${className}`,
+        "MIME-Version: 1.0",
+        'Content-Type: text/plain; charset="UTF-8"',
+        "",
+        emailBody
+      ].join("\r\n");
+
+      const raw = Buffer.from(mime)
+        .toString("base64")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+
+      await gmail.users.messages.send({
+        userId: "me",
+        requestBody: { raw }
+      });
+    }
+
+    return res.json({
+      success: true,
+      docUrl,
+      recipientsSent: recipients.length,
+      summary: `Weekly timetable generated for ${className}. Google Doc created and sent to ${recipients.length} recipient(s).`
+    });
+  } catch (err) {
+    console.error("[Weekly Timetable Workflow Error]:", err.message);
+
+    if (err?.response?.status === 401) {
+      return res.status(401).json({ error: "Google session expired. Please reconnect Docs/Gmail." });
+    }
+
+    return res.status(500).json({
+      error: "Failed to generate timetable, save to Docs, or send Gmail",
+      details: err.message
+    });
+  }
+});
+
+app.post("/api/workflows/weekly-timetable/save-doc", async (req, res) => {
+  const userId = req.headers["x-user-id"];
+  const prompt = String(req.body?.prompt || "").trim();
+  const className = String(req.body?.class_name || "Class").trim();
+
+  if (!userId) {
+    return res.status(401).json({ error: "User not authenticated" });
+  }
+
+  if (!prompt) {
+    return res.status(400).json({ error: "prompt is required" });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { docsTokens: true }
+    });
+
+    if (!user?.docsTokens) {
+      return res.status(400).json({ error: "Please connect Google Docs first" });
+    }
+
+    const aiRes = await generateText({
+      model: openai("gpt-4o-mini"),
+      prompt
+    });
+
+    const timetableOutput = aiRes.text || "No timetable output generated.";
+    const todayDate = new Date().toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric"
+    });
+
+    const fullDocText = [
+      "WEEKLY CLASS TIMETABLE",
+      "",
+      `Class: ${className}`,
+      `Generated On: ${todayDate}`,
+      "",
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+      "",
+      timetableOutput,
+      "",
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+      "",
+      "Document auto-generated by Web Explore AI | Review before final circulation"
+    ].join("\n");
+
+    const docsOAuth = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    docsOAuth.setCredentials(user.docsTokens);
+    const docs = google.docs({ version: "v1", auth: docsOAuth });
+
+    const docTitle = `[${todayDate}] Weekly Timetable - ${className}`;
+    const created = await docs.documents.create({
+      requestBody: {
+        title: docTitle
+      }
+    });
+    const documentId = created.data.documentId;
+
+    await docs.documents.batchUpdate({
+      documentId,
+      requestBody: {
+        requests: [
+          {
+            insertText: {
+              location: { index: 1 },
+              text: fullDocText
+            }
+          }
+        ]
+      }
+    });
+
+    const docUrl = `https://docs.google.com/document/d/${documentId}/edit`;
+
+    return res.json({
+      success: true,
+      docUrl,
+      summary: `Weekly timetable generated for ${className} and saved to Google Docs.`
+    });
+  } catch (err) {
+    console.error("[Weekly Timetable Save Doc Error]:", err.message);
+
+    const errorMessage = String(err?.message || "");
+    const disabledDocsApi = /Google Docs API has not been used|docs\.googleapis\.com\/overview\?project=/i.test(errorMessage);
+
+    if (disabledDocsApi) {
+      const activationMatch = errorMessage.match(/https:\/\/console\.developers\.google\.com\/apis\/api\/docs\.googleapis\.com\/overview\?project=\d+/i);
+      return res.status(503).json({
+        error: "Google Docs API is disabled for your Google Cloud project.",
+        details: "Enable Google Docs API in Google Cloud Console, wait 2-5 minutes, then retry.",
+        activationUrl: activationMatch?.[0] || "https://console.developers.google.com/apis/api/docs.googleapis.com/overview"
+      });
+    }
+
+    if (err?.response?.status === 401) {
+      return res.status(401).json({ error: "Google Docs session expired. Please reconnect Google Docs." });
+    }
+
+    return res.status(500).json({
+      error: "Failed to generate timetable and save in Google Docs",
+      details: err.message
+    });
+  }
+});
+
+app.post("/api/workflows/tuition-timetable/save-doc", async (req, res) => {
+  const userId = req.headers["x-user-id"];
+  const prompt = String(req.body?.prompt || "").trim();
+  const className = String(req.body?.class_name || "Class").trim();
+
+  if (!userId) {
+    return res.status(401).json({ error: "User not authenticated" });
+  }
+
+  if (!prompt) {
+    return res.status(400).json({ error: "prompt is required" });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { docsTokens: true }
+    });
+
+    if (!user?.docsTokens) {
+      return res.status(400).json({ error: "Please connect Google Docs first" });
+    }
+
+    const aiRes = await generateText({
+      model: openai("gpt-4o-mini"),
+      prompt
+    });
+
+    const timetableOutput = aiRes.text || "No timetable output generated.";
+    const todayDate = new Date().toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "long",
+      day: "numeric"
+    });
+
+    const fullDocText = [
+      "TUITION TIMETABLE",
+      "",
+      `Batch: ${className}`,
+      `Generated On: ${todayDate}`,
+      "",
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+      "",
+      timetableOutput,
+      "",
+      "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+      "",
+      "Document auto-generated by Web Explore AI | Review before final circulation"
+    ].join("\n");
+
+    const docsOAuth = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    docsOAuth.setCredentials(user.docsTokens);
+    const docs = google.docs({ version: "v1", auth: docsOAuth });
+
+    const docTitle = `[${todayDate}] Tuition Timetable - ${className}`;
+    const created = await docs.documents.create({
+      requestBody: { title: docTitle }
+    });
+    const documentId = created.data.documentId;
+
+    await docs.documents.batchUpdate({
+      documentId,
+      requestBody: {
+        requests: [
+          {
+            insertText: {
+              location: { index: 1 },
+              text: fullDocText
+            }
+          }
+        ]
+      }
+    });
+
+    const docUrl = `https://docs.google.com/document/d/${documentId}/edit`;
+
+    return res.json({
+      success: true,
+      docUrl,
+      summary: `Tuition timetable generated for ${className} and saved to Google Docs.`
+    });
+  } catch (err) {
+    console.error("[Tuition Timetable Save Doc Error]:", err.message);
+
+    const errorMessage = String(err?.message || "");
+    const disabledDocsApi = /Google Docs API has not been used|docs\.googleapis\.com\/overview\?project=/i.test(errorMessage);
+
+    if (disabledDocsApi) {
+      const activationMatch = errorMessage.match(/https:\/\/console\.developers\.google\.com\/apis\/api\/docs\.googleapis\.com\/overview\?project=\d+/i);
+      return res.status(503).json({
+        error: "Google Docs API is disabled for your Google Cloud project.",
+        details: "Enable Google Docs API in Google Cloud Console, wait 2-5 minutes, then retry.",
+        activationUrl: activationMatch?.[0] || "https://console.developers.google.com/apis/api/docs.googleapis.com/overview"
+      });
+    }
+
+    if (err?.response?.status === 401) {
+      return res.status(401).json({ error: "Google Docs session expired. Please reconnect Google Docs." });
+    }
+
+    return res.status(500).json({
+      error: "Failed to generate timetable and save in Google Docs",
+      details: err.message
+    });
+  }
+});
+
+app.post("/api/workflows/weekly-timetable/send-email", async (req, res) => {
+  const userId = req.headers["x-user-id"];
+  const prompt = String(req.body?.prompt || "").trim();
+  const className = String(req.body?.class_name || "Class").trim();
+  const recipientEmailsRaw = String(req.body?.recipient_emails || "").trim();
+
+  if (!userId) {
+    return res.status(401).json({ error: "User not authenticated" });
+  }
+
+  if (!prompt) {
+    return res.status(400).json({ error: "prompt is required" });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, gmailTokens: true }
+    });
+
+    if (!user?.gmailTokens) {
+      return res.status(400).json({ error: "Please connect Gmail first" });
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const recipients = recipientEmailsRaw
+      .split(/[;,\n]/)
+      .map((e) => e.trim())
+      .filter((e) => emailRegex.test(e));
+
+    if (recipients.length === 0 && user?.email && emailRegex.test(user.email)) {
+      recipients.push(user.email);
+    }
+
+    if (recipients.length === 0) {
+      return res.status(400).json({ error: "Please provide at least one valid recipient email" });
+    }
+
+    const aiRes = await generateText({
+      model: openai("gpt-4o-mini"),
+      prompt
+    });
+
+    const timetableOutput = aiRes.text || "No timetable output generated.";
+
+    const gmailOAuth = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    gmailOAuth.setCredentials(user.gmailTokens);
+    const gmail = google.gmail({ version: "v1", auth: gmailOAuth });
+
+    const emailBody = [
+      "Hello,",
+      "",
+      `Here is the generated weekly timetable for ${className}.`,
+      "",
+      timetableOutput,
+      "",
+      "Generated via Web Explore AI"
+    ].join("\n");
+
+    for (const recipient of recipients) {
+      const mime = [
+        `To: ${recipient}`,
+        `Subject: Weekly Timetable - ${className}`,
+        "MIME-Version: 1.0",
+        'Content-Type: text/plain; charset="UTF-8"',
+        "",
+        emailBody
+      ].join("\r\n");
+
+      const raw = Buffer.from(mime)
+        .toString("base64")
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/, "");
+
+      await gmail.users.messages.send({
+        userId: "me",
+        requestBody: { raw }
+      });
+    }
+
+    return res.json({
+      success: true,
+      recipientsSent: recipients.length,
+      summary: `Weekly timetable generated for ${className} and emailed to ${recipients.length} recipient(s).`
+    });
+  } catch (err) {
+    console.error("[Weekly Timetable Send Email Error]:", err.message);
+
+    if (err?.response?.status === 401) {
+      return res.status(401).json({ error: "Gmail session expired. Please reconnect Gmail." });
+    }
+
+    return res.status(500).json({
+      error: "Failed to generate timetable and send emails",
       details: err.message
     });
   }
@@ -2102,6 +3054,171 @@ app.post("/api/workflows/leadership-hr-handover/start", async (req, res) => {
     console.error("[Leadership HR Handover Workflow Error]:", err.message);
     return res.status(500).json({
       error: "Failed to send Leadership HR Handover email",
+      details: err.message
+    });
+  }
+});
+
+app.post("/api/workflows/hr-release/start", async (req, res) => {
+  const userId = req.headers["x-user-id"];
+  const employeeName = String(req.body?.employee_name || "").trim();
+  const employeeEmail = String(req.body?.employee_email || "").trim();
+  const lastWorkingDay = String(req.body?.last_working_day || "").trim();
+  const reason = String(req.body?.reason || "").trim();
+  const finalSettlement = String(req.body?.final_settlement || "").trim();
+  const hrManagerName = String(req.body?.hr_manager_name || "").trim();
+
+  if (!userId) {
+    return res.status(401).json({ error: "User not authenticated" });
+  }
+
+  if (!employeeName || !employeeEmail || !lastWorkingDay || !reason || !finalSettlement || !hrManagerName) {
+    return res.status(400).json({
+      error: "All fields are required (employee_name, employee_email, last_working_day, reason, final_settlement, hr_manager_name)"
+    });
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(employeeEmail)) {
+    return res.status(400).json({ error: "Invalid employee email" });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { gmailTokens: true }
+    });
+
+    if (!user?.gmailTokens) {
+      return res.status(400).json({ error: "Please connect Gmail first" });
+    }
+
+    const gmailOAuth = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      process.env.GOOGLE_REDIRECT_URI
+    );
+    gmailOAuth.setCredentials(user.gmailTokens);
+
+    const gmail = google.gmail({ version: "v1", auth: gmailOAuth });
+
+    const subject = `Notice of Release | ${employeeName}`;
+    const lines = [
+      `Dear ${employeeName},`,
+      "",
+      `We want to formally notify you about your release from employment, effective ${lastWorkingDay}.`,
+      "",
+      `Reason for Release: ${reason}`,
+      `Last Working Day: ${lastWorkingDay}`,
+      `Final Settlement: ${finalSettlement}`,
+      "",
+      `Please ensure to:`,
+      `1. Return all company equipment and materials`,
+      `2. Hand over all pending work and documentation`,
+      `3. Coordinate with ${hrManagerName} for any outstanding dues or benefits`,
+      "",
+      `For any queries regarding your final settlement or exit documentation, please reach out to our HR department.`,
+      "",
+      `We appreciate your contribution to the organization and wish you the best for your future endeavors.`,
+      "",
+      "Best Regards,",
+      `${hrManagerName}`,
+      "Human Resources Department"
+    ].filter(Boolean);
+
+    const mime = [
+      `To: ${employeeEmail}`,
+      `Subject: ${subject}`,
+      "MIME-Version: 1.0",
+      'Content-Type: text/plain; charset="UTF-8"',
+      "",
+      lines.join("\n")
+    ].join("\r\n");
+
+    const raw = Buffer.from(mime)
+      .toString("base64")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+
+    await gmail.users.messages.send({
+      userId: "me",
+      requestBody: { raw }
+    });
+
+    return res.json({
+      success: true,
+      sentTo: employeeEmail,
+      summary: `HR Release email sent to ${employeeName} (${employeeEmail}). Last working day: ${lastWorkingDay}.`
+    });
+  } catch (err) {
+    console.error("[HR Release Workflow Error]:", err.message);
+    return res.status(500).json({
+      error: "Failed to send HR Release email",
+      details: err.message
+    });
+  }
+});
+
+app.post("/api/workflows/experience-letter/start", async (req, res) => {
+  const userId = req.headers["x-user-id"];
+  const employeeName = String(req.body?.employee_name || "").trim();
+  const designation = String(req.body?.designation || "").trim();
+  const department = String(req.body?.department || "").trim();
+  const joiningDate = String(req.body?.joining_date || "").trim();
+  const leavingDate = String(req.body?.leaving_date || "").trim();
+  const managerName = String(req.body?.manager_name || "").trim();
+  const companyName = String(req.body?.company_name || "").trim();
+  const authorizedSignatoryName = String(req.body?.authorized_signatory_name || "").trim();
+  const authorizedSignatoryTitle = String(req.body?.authorized_signatory_title || "").trim();
+
+  if (!userId) {
+    return res.status(401).json({ error: "User not authenticated" });
+  }
+
+  if (!employeeName || !designation || !department || !joiningDate || !leavingDate || !managerName || !companyName || !authorizedSignatoryName || !authorizedSignatoryTitle) {
+    return res.status(400).json({
+      error: "All fields are required (employee_name, designation, department, joining_date, leaving_date, manager_name, company_name, authorized_signatory_name, authorized_signatory_title)"
+    });
+  }
+
+  try {
+    const issueDate = new Date().toLocaleDateString();
+    const paragraphs = [
+      `This is to certify that ${employeeName} was employed with ${companyName} as ${designation} in the ${department} department from ${joiningDate} to ${leavingDate}.`,
+      `${employeeName} worked under the supervision of ${managerName} and carried out assigned responsibilities with professionalism, commitment, and a positive work ethic.`,
+      `During the tenure, ${employeeName} contributed to the team with diligence and maintained professional conduct in the course of employment.`,
+      `This experience letter is generated as a draft for internal use. It must be reviewed for factual accuracy, placed on official company letterhead where applicable, and signed by an authorized representative before being issued externally.`
+    ];
+
+    const draftLetter = [
+      "EXPERIENCE LETTER",
+      "",
+      `Date: ${issueDate}`,
+      "",
+      "TO WHOM IT MAY CONCERN",
+      "",
+      ...paragraphs,
+      "",
+      "Yours faithfully,",
+      `${authorizedSignatoryName}`,
+      `${authorizedSignatoryTitle}`,
+      `${companyName}`
+    ].join("\n");
+
+    return res.json({
+      success: true,
+      summary: `Experience Letter draft generated for ${employeeName}. Review and authorize before issuing.`,
+      draftLetter,
+      issueDate,
+      paragraphs,
+      signatoryName: authorizedSignatoryName,
+      signatoryTitle: authorizedSignatoryTitle
+    });
+  } catch (err) {
+    console.error("[Experience Letter Workflow Error]:", err.message);
+    return res.status(500).json({
+      error: "Failed to generate Experience Letter draft",
       details: err.message
     });
   }
