@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
 import debounce from "lodash/debounce";
 import DOMPurify from "dompurify";
-import { Plus, User, X, Bot, Globe, Mic, Sun, Moon, Check, Zap, ArrowLeft } from "lucide-react";
+import { Plus, User, X, Bot, Globe, Mic, Sun, Moon, Check, Zap, ArrowLeft, History, ChevronDown, ChevronRight } from "lucide-react";
 import { jsPDF } from "jspdf";
 import { v4 as uuidv4 } from "uuid";
 
@@ -282,6 +282,12 @@ function App() {
   const [mode, setMode] = useState("search");
   const [listening, setListening] = useState(false);
   const [isProfileSidebarOpen, setIsProfileSidebarOpen] = useState(false);
+  const [isRecentSidebarOpen, setIsRecentSidebarOpen] = useState(false);
+  const [activeLeftPaneTab, setActiveLeftPaneTab] = useState("recent");
+  const [recentHistory, setRecentHistory] = useState([]);
+  const [recentHistoryLoading, setRecentHistoryLoading] = useState(false);
+  const [recentHistoryError, setRecentHistoryError] = useState("");
+  const [expandedHistoryId, setExpandedHistoryId] = useState(null);
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("answer");
   const [safeSearchByTab, setSafeSearchByTab] = useState(() => normalizeSafeSearchByTab(localStorage.getItem("safeSearchByTab")));
@@ -320,6 +326,54 @@ function App() {
   const user = JSON.parse(localStorage.getItem("user") || "{}");
   const [currentPlanName, setCurrentPlanName] = useState(user?.currentPlan?.name || "FREE");
   const isUltraUser = currentPlanName === "ULTRA";
+
+  const formatHistoryTimestamp = (value) => {
+    if (!value) return "Unknown time";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return "Unknown time";
+    return parsed.toLocaleString([], {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const fetchRecentHistory = useCallback(async () => {
+    if (!user?.id) {
+      setRecentHistory([]);
+      setRecentHistoryError("Sign in to view recent history.");
+      return;
+    }
+
+    setRecentHistoryLoading(true);
+    setRecentHistoryError("");
+
+    try {
+      const res = await fetch("/api/history", {
+        headers: {
+          "x-user-id": user.id,
+        },
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setRecentHistoryError(data.error || "Unable to fetch history.");
+        setRecentHistory([]);
+        return;
+      }
+
+      const items = Array.isArray(data.history) ? data.history : [];
+      setRecentHistory(items);
+      setExpandedHistoryId((prev) => (items.some((item) => item.id === prev) ? prev : null));
+    } catch {
+      setRecentHistoryError("Unable to fetch history.");
+      setRecentHistory([]);
+    } finally {
+      setRecentHistoryLoading(false);
+    }
+  }, [user?.id]);
 
   const handleUpgradePlanClick = (e) => {
     e?.preventDefault?.();
@@ -811,6 +865,11 @@ function App() {
     setActiveEmbedSlug("");
   }, [location.pathname]);
 
+  useEffect(() => {
+    if (!isRecentSidebarOpen || activeLeftPaneTab !== "recent") return;
+    fetchRecentHistory();
+  }, [isRecentSidebarOpen, activeLeftPaneTab, location.pathname, fetchRecentHistory]);
+
   const toggleTheme = () => setTheme(theme === "light" ? "dark" : "light");
 
   const toggleModelDropdown = () => setIsModelDropdownOpen(!isModelDropdownOpen);
@@ -1233,6 +1292,39 @@ function App() {
   const handleAutomateWorkflows = () => {
     navigate("/workflows");
     setIsProfileSidebarOpen(false);
+  };
+
+  const runHistoryEntry = (entry) => {
+    const query = String(entry?.inputText || "").trim();
+    if (!query) return;
+
+    const historyMode = entry?.queryType === "generate" ? "ai" : "search";
+    setPrompt(query);
+    setMode(historyMode);
+    handleSubmit(null, query, historyMode);
+
+    if (window.innerWidth <= 1024) {
+      setIsRecentSidebarOpen(false);
+    }
+  };
+
+  const prefillHistoryEntry = (entry) => {
+    const query = String(entry?.inputText || "").trim();
+    if (!query) return;
+
+    const historyMode = entry?.queryType === "generate" ? "ai" : "search";
+    setPrompt(query);
+    setMode(historyMode);
+    navigate("/search", {
+      state: {
+        prefillPrompt: query,
+        autoRunMode: null,
+      },
+    });
+
+    if (window.innerWidth <= 1024) {
+      setIsRecentSidebarOpen(false);
+    }
   };
 
   const handleSubmit = async (e, customPrompt = null, customMode = null) => {
@@ -3789,6 +3881,16 @@ function App() {
           <User size={24} />
         </button>
         <button
+          className={`sidebar-btn ${isRecentSidebarOpen ? "active" : ""}`}
+          onClick={() => {
+            setIsRecentSidebarOpen((prev) => !prev);
+            setIsProfileSidebarOpen(false);
+          }}
+          title="Recent"
+        >
+          <History size={24} />
+        </button>
+        <button
           className="sidebar-btn"
           onClick={() => {
             setResponse(null);
@@ -3804,6 +3906,92 @@ function App() {
         <button className="theme-toggle-btn" onClick={toggleTheme} title="Toggle Theme">
           {theme === "light" ? <Moon size={24} /> : <Sun size={24} />}
         </button>
+      </div>
+
+      <div className={`left-pane-sidebar ${isRecentSidebarOpen ? "open" : ""}`}>
+        <div className="left-pane-header">
+          <h2>Workspace</h2>
+          <button
+            className="left-pane-close"
+            onClick={() => setIsRecentSidebarOpen(false)}
+            aria-label="Close left pane"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="left-pane-tabs" role="tablist" aria-label="Sidebar tabs">
+          <button
+            className={`left-pane-tab ${activeLeftPaneTab === "recent" ? "active" : ""}`}
+            onClick={() => setActiveLeftPaneTab("recent")}
+            type="button"
+          >
+            Recent
+          </button>
+        </div>
+
+        <div className="left-pane-content">
+          {activeLeftPaneTab === "recent" && (
+            <div className="recent-list-wrap">
+              <div className="recent-list-toolbar">
+                <span>Latest 20 queries</span>
+                <button type="button" onClick={fetchRecentHistory} className="recent-refresh-btn">
+                  Refresh
+                </button>
+              </div>
+
+              {recentHistoryLoading && <p className="recent-helper">Loading recent history...</p>}
+              {!recentHistoryLoading && recentHistoryError && <p className="recent-helper error">{recentHistoryError}</p>}
+              {!recentHistoryLoading && !recentHistoryError && recentHistory.length === 0 && (
+                <p className="recent-helper">No history yet. Run a search to populate this tab.</p>
+              )}
+
+              {!recentHistoryLoading && !recentHistoryError && recentHistory.length > 0 && (
+                <div className="recent-list">
+                  {recentHistory.map((entry) => {
+                    const isExpanded = expandedHistoryId === entry.id;
+                    const queryText = String(entry.inputText || "").trim() || "Untitled query";
+                    const queryType = String(entry.queryType || "search").toLowerCase();
+
+                    return (
+                      <div key={entry.id} className={`recent-item ${isExpanded ? "expanded" : ""}`}>
+                        <button
+                          type="button"
+                          className="recent-item-trigger"
+                          onClick={() => setExpandedHistoryId((prev) => (prev === entry.id ? null : entry.id))}
+                        >
+                          <span className="recent-item-caret">
+                            {isExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                          </span>
+                          <span className="recent-item-main">
+                            <span className="recent-item-query">{queryText}</span>
+                            <span className="recent-item-meta">
+                              {queryType === "generate" ? "AI" : "WEB"} • {formatHistoryTimestamp(entry.createdAt)}
+                            </span>
+                          </span>
+                        </button>
+
+                        {isExpanded && (
+                          <div className="recent-item-expanded">
+                            <p className="recent-item-fulltext">{queryText}</p>
+                            <div className="recent-item-actions">
+                              <button type="button" onClick={() => runHistoryEntry(entry)}>
+                                Run Again
+                              </button>
+                              <button type="button" onClick={() => prefillHistoryEntry(entry)}>
+                                Use As Draft
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className={`profile-sidebar ${isProfileSidebarOpen ? "open" : ""}`}>
@@ -3853,7 +4041,7 @@ function App() {
         )}
       </div>
 
-      <div className="content-area">
+      <div className={`content-area ${isRecentSidebarOpen ? "with-left-pane" : ""}`}>
         <div className={`full-width-container${response ? " has-response" : ""}`}>
           {location.pathname === "/search" && (
             <>
