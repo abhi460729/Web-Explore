@@ -708,11 +708,9 @@ function App() {
   useEffect(() => {
 
     const handleMessage = (event) => {
-
       if (event.data?.success) {
         window.location.reload();
       }
-
     };
 
     window.addEventListener("message", handleMessage);
