@@ -323,6 +323,9 @@ function App() {
     sheets: false
   });
   const [toast, setToast] = useState(null);
+  const [isLoginOverlayDismissed, setIsLoginOverlayDismissed] = useState(false);
+  const [googleLoginLoading, setGoogleLoginLoading] = useState(false);
+  const [googleLoginError, setGoogleLoginError] = useState("");
 
   const showToast = (message, type = "info") => {
     setToast({ message, type });
@@ -330,6 +333,10 @@ function App() {
   };
 
   const user = JSON.parse(localStorage.getItem("user") || "{}");
+  const isGuestUser = !user?.id;
+  const queryFromUrl = new URLSearchParams(location.search).get("query");
+  const isSharedSearchRoute = /^\/search\/(?:ai\/)?[^/]+$/.test(location.pathname) && !location.pathname.includes("/new/");
+  const shouldShowSharedLoginGate = isGuestUser && isSharedSearchRoute && !!queryFromUrl;
   const [currentPlanName, setCurrentPlanName] = useState(user?.currentPlan?.name || "FREE");
   const isUltraUser = currentPlanName === "ULTRA";
   const integrationEntries = [
@@ -943,7 +950,85 @@ function App() {
     fetchRecentHistory();
   }, [isRecentSidebarOpen, activeLeftPaneTab, location.pathname, fetchRecentHistory]);
 
+  useEffect(() => {
+    if (!shouldShowSharedLoginGate) {
+      setIsLoginOverlayDismissed(false);
+      setGoogleLoginError("");
+    }
+  }, [shouldShowSharedLoginGate]);
+
   const toggleTheme = () => setTheme(theme === "light" ? "dark" : "light");
+
+  const ensureGoogleIdentityScript = () => {
+    if (window.google?.accounts?.id) return Promise.resolve();
+
+    return new Promise((resolve, reject) => {
+      const existing = document.querySelector('script[src="https://accounts.google.com/gsi/client"]');
+
+      if (existing) {
+        existing.addEventListener("load", () => resolve(), { once: true });
+        existing.addEventListener("error", () => reject(new Error("Google script failed to load")), { once: true });
+        return;
+      }
+
+      const script = document.createElement("script");
+      script.src = "https://accounts.google.com/gsi/client";
+      script.async = true;
+      script.defer = true;
+      script.onload = () => resolve();
+      script.onerror = () => reject(new Error("Google script failed to load"));
+      document.head.appendChild(script);
+    });
+  };
+
+  const handleContinueWithGoogle = async () => {
+    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+
+    if (!clientId) {
+      setGoogleLoginError("Google login is not configured. Please contact support.");
+      return;
+    }
+
+    setGoogleLoginLoading(true);
+    setGoogleLoginError("");
+
+    try {
+      await ensureGoogleIdentityScript();
+
+      window.google.accounts.id.initialize({
+        client_id: clientId,
+        callback: async (googleUser) => {
+          try {
+            const idToken = googleUser?.credential;
+            if (!idToken) throw new Error("No Google credential received");
+
+            const authRes = await fetch("/api/auth/google", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ token: idToken }),
+            });
+
+            const authData = await authRes.json();
+            if (!authRes.ok || !authData?.user) {
+              throw new Error(authData?.error || "Authentication failed");
+            }
+
+            localStorage.setItem("user", JSON.stringify(authData.user));
+            window.location.reload();
+          } catch (err) {
+            setGoogleLoginError(err?.message || "Google sign-in failed");
+            setGoogleLoginLoading(false);
+          }
+        },
+      });
+
+      window.google.accounts.id.prompt();
+      setTimeout(() => setGoogleLoginLoading(false), 4500);
+    } catch (err) {
+      setGoogleLoginError(err?.message || "Unable to start Google sign-in");
+      setGoogleLoginLoading(false);
+    }
+  };
 
   const toggleModelDropdown = () => setIsModelDropdownOpen(!isModelDropdownOpen);
 
@@ -1555,6 +1640,7 @@ function App() {
           headers: {
             "Content-Type": "application/json",
             "x-user-id": user?.id || "",
+            "x-allow-guest": "1",
           },
           body: JSON.stringify({ prompt: query, model: selectedModel }),
         });
@@ -1564,6 +1650,7 @@ function App() {
           headers: {
             "Content-Type": "application/json",
             "x-user-id": user?.id || "",
+            "x-allow-guest": "1",
           },
           body: JSON.stringify({ query, safeMode: safeSearchByTab.images }),
         });
@@ -3996,7 +4083,7 @@ function App() {
   );
 
   return (
-    <div className="searchpage min-h-screen">
+    <div className={`searchpage min-h-screen ${shouldShowSharedLoginGate ? "shared-preview-locked" : ""}`}>
       <div className="nav-sidebar">
         <button className="sidebar-btn" onClick={() => setIsProfileSidebarOpen(true)} title="Profile">
           <User size={24} />
@@ -4686,6 +4773,49 @@ function App() {
 
         </div>
       </div>
+
+      {shouldShowSharedLoginGate && (
+        <div className="shared-login-overlay" role="dialog" aria-modal="true" aria-label="Sign in required">
+          {!isLoginOverlayDismissed ? (
+            <div className="shared-login-modal">
+              <button
+                type="button"
+                className="shared-login-close"
+                onClick={() => setIsLoginOverlayDismissed(true)}
+                aria-label="Close login popup"
+              >
+                <X size={16} />
+              </button>
+
+              <p className="shared-login-kicker">Preview Mode</p>
+              <h3>Sign in to interact with this result</h3>
+              <p>
+                You can view this shared page in blurred mode. Continue with Google to unlock full answer,
+                sources, tabs and actions.
+              </p>
+
+              <button
+                type="button"
+                className="shared-google-btn"
+                onClick={handleContinueWithGoogle}
+                disabled={googleLoginLoading}
+              >
+                {googleLoginLoading ? "Starting Google Sign-In..." : "Continue with Google"}
+              </button>
+
+              {googleLoginError && <p className="shared-login-error">{googleLoginError}</p>}
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="shared-login-pill"
+              onClick={() => setIsLoginOverlayDismissed(false)}
+            >
+              Sign in with Google to unlock this page
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

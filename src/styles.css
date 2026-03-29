@@ -204,6 +204,116 @@ form {
   cursor: default;
 }
 
+/* Shared permalink preview lock for logged-out users */
+.shared-preview-locked .content-area,
+.shared-preview-locked .left-pane-sidebar,
+.shared-preview-locked .profile-sidebar {
+  filter: blur(8px);
+  pointer-events: none;
+  user-select: none;
+}
+
+.shared-login-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.shared-login-modal {
+  width: min(92vw, 440px);
+  background: var(--bg-secondary);
+  border: 1px solid var(--card-border);
+  border-radius: 18px;
+  padding: 1.2rem 1.1rem 1rem;
+  box-shadow: var(--shadow-md);
+  color: var(--text-primary);
+  position: relative;
+  pointer-events: auto;
+}
+
+.shared-login-close {
+  position: absolute;
+  top: 0.65rem;
+  right: 0.65rem;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.shared-login-kicker {
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #fc3f1d;
+  font-weight: 700;
+  margin-bottom: 0.4rem;
+}
+
+.shared-login-modal h3 {
+  font-size: 1.08rem;
+  line-height: 1.35;
+  margin: 0 0 0.45rem;
+  color: var(--text-primary);
+}
+
+.shared-login-modal p {
+  margin: 0 0 0.8rem;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.shared-google-btn {
+  width: 100%;
+  border: none;
+  border-radius: 12px;
+  min-height: 2.7rem;
+  padding: 0.55rem 0.9rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #fff;
+  background: #fc3f1d;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.shared-google-btn:hover {
+  background: #e53510;
+}
+
+.shared-google-btn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.shared-login-error {
+  margin-top: 0.6rem;
+  color: #dc2626;
+  font-size: 0.82rem;
+}
+
+.shared-login-pill {
+  pointer-events: auto;
+  position: fixed;
+  bottom: 1.1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 1px solid var(--card-border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border-radius: 999px;
+  padding: 0.58rem 1rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+}
+
 input[type="text"] {
   font-size: 1.05rem;
   background-color: var(--input-bg);

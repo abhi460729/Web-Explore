@@ -441,7 +441,16 @@ app.get("/api/image-proxy", async (req, res) => {
 // ── Usage & Plan limit middleware (Redis-cached – avoids 3 DB hits per request) ─
 async function checkUsageAndPlan(req, res, next) {
   const userId = req.headers['x-user-id'];
-  if (!userId) return res.status(401).json({ error: "Please login first" });
+  const allowGuest = req.headers["x-allow-guest"] === "1";
+
+  if (!userId) {
+    if (!allowGuest) return res.status(401).json({ error: "Please login first" });
+
+    req.user = { id: null, name: "Guest" };
+    req.userPlan = { name: "FREE", usageLimit: 0 };
+    req.isGuest = true;
+    return next();
+  }
 
   try {
     // ── Step 1: Load user + plan from cache or DB ─────────────────────────
@@ -865,31 +874,33 @@ app.post("/api/generate", searchLimiter, checkUsageAndPlan, async (req, res) => 
     const result = await enqueueGenerateJob({
       prompt,
       model,
-      userId: req.user.id,
+      userId: req.user?.id || "guest",
     });
     const text = result?.text || "";
     const suggestions = Array.isArray(result?.suggestions) ? result.suggestions : [];
     const tokens = Number(result?.tokens) || Math.ceil((prompt.length + text.length) / 4) + 300;
     const modelUsed = result?.modelUsed || model;
 
-    await prisma.usageLog.create({
-      data: {
-        userId: req.user.id,
-        queryType: "generate",
-        tokensUsed: tokens,
-        modelUsed,
-        success: true,
-        inputText: prompt,
-      },
-    });
+    if (!req.isGuest && req.user?.id) {
+      await prisma.usageLog.create({
+        data: {
+          userId: req.user.id,
+          queryType: "generate",
+          tokensUsed: tokens,
+          modelUsed,
+          success: true,
+          inputText: prompt,
+        },
+      });
 
-    await prisma.queryHistory.create({
-      data: {
-        userId: req.user.id,
-        inputText: prompt,
-        queryType: "generate",
-      },
-    });
+      await prisma.queryHistory.create({
+        data: {
+          userId: req.user.id,
+          inputText: prompt,
+          queryType: "generate",
+        },
+      });
+    }
 
     res.json({ text, suggestions, modelUsed });
   } catch (err) {
@@ -1083,25 +1094,27 @@ app.post("/api/search", searchLimiter, checkUsageAndPlan, async (req, res) => {
 
     const tokens = Math.ceil((query.length + answer.length) / 4) + 500;
 
-    await prisma.usageLog.create({
-      data: {
-        userId: req.user.id,
-        queryType: "search",
-        tokensUsed: tokens,
-        modelUsed: searchModel,
-        requestId: finalId,
-        success: true,
-        inputText: query,
-      },
-    });
+    if (!req.isGuest && req.user?.id) {
+      await prisma.usageLog.create({
+        data: {
+          userId: req.user.id,
+          queryType: "search",
+          tokensUsed: tokens,
+          modelUsed: searchModel,
+          requestId: finalId,
+          success: true,
+          inputText: query,
+        },
+      });
 
-    await prisma.queryHistory.create({
-      data: {
-        userId: req.user.id,
-        inputText: query,
-        queryType: "search",
-      },
-    });
+      await prisma.queryHistory.create({
+        data: {
+          userId: req.user.id,
+          inputText: query,
+          queryType: "search",
+        },
+      });
+    }
 
     const responsePayload = {
       summary: answer,
