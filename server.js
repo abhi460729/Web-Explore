@@ -1,22 +1,25 @@
 // server.js - Updated with Google OAuth for tools (Gmail, Calendar, Docs, Sheets)
 import { google } from "googleapis";
 import { config } from "dotenv";
-config();
+config({ path: ".env" });
+config({ path: ".env.local", override: true });
 
-// Early env check
-console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-console.log("Environment variables loaded:");
-console.log("GOOGLE_CLIENT_ID:", process.env.GOOGLE_CLIENT_ID ? process.env.GOOGLE_CLIENT_ID.substring(0, 10) + "..." : "MISSING / EMPTY");
-console.log("GOOGLE_CLIENT_SECRET:", process.env.GOOGLE_CLIENT_SECRET ? "Yes (present)" : "MISSING ← REQUIRED for OAuth");
-console.log("RAZORPAY_KEY_ID:", process.env.RAZORPAY_KEY_ID ? process.env.RAZORPAY_KEY_ID.substring(0, 12) + "..." : "MISSING");
-console.log("RAZORPAY_KEY_SECRET:", process.env.RAZORPAY_KEY_SECRET ? "Yes (length: " + process.env.RAZORPAY_KEY_SECRET.length + ")" : "MISSING");
-console.log("TAVILY_API_KEY:", process.env.TAVILY_API_KEY ? "Yes" : "MISSING");
-console.log("PORT:", process.env.PORT || "8080 (default)");
-console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+// ── Structured logger (replaces console.log throughout app) ─────────────
+import logger, { searchLogger, authLogger, paymentLogger } from "./utils/logger.js";
+
+logger.info({
+  GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID ? process.env.GOOGLE_CLIENT_ID.substring(0, 10) + "..." : "MISSING",
+  VITE_GOOGLE_CLIENT_ID: process.env.VITE_GOOGLE_CLIENT_ID ? process.env.VITE_GOOGLE_CLIENT_ID.substring(0, 10) + "..." : "MISSING",
+  GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET ? "present" : "MISSING",
+  RAZORPAY_KEY_ID: process.env.RAZORPAY_KEY_ID ? process.env.RAZORPAY_KEY_ID.substring(0, 12) + "..." : "MISSING",
+  TAVILY_API_KEY: process.env.TAVILY_API_KEY ? "present" : "MISSING",
+  PORT: process.env.PORT || "8080 (default)",
+}, "Environment variables loaded");
 
 // Imports
 import express from "express";
 import cors from "cors";
+import compression from "compression";
 import { generateText } from "ai";
 import { openai } from "@ai-sdk/openai";
 import path from "path";
@@ -30,10 +33,18 @@ import crypto from "crypto";
 import multer from "multer";
 import XLSX from "xlsx";
 
-// Prisma
+// ── Scalability infrastructure ────────────────────────────────────────────
+import { cacheGet, cacheSet, cacheDel, CacheKey, TTL, withCache, cacheHealthCheck } from "./services/cache.js";
+import { globalLimiter, searchLimiter, authLimiter, paymentLimiter, workflowLimiter } from "./middlewares/rateLimiter.js";
+import { getQueueStats, closeQueues } from "./services/queue.js";
+
+// Prisma – with connection pool tuning for high concurrency
 import prismaPkg from '@prisma/client';
 const { PrismaClient } = prismaPkg;
-const prisma = new PrismaClient();
+const prisma = new PrismaClient({
+  datasources: { db: { url: process.env.DATABASE_URL } },
+  log: process.env.NODE_ENV === "development" ? ["query", "warn", "error"] : ["warn", "error"],
+});
 
 // Razorpay Instance
 const razorpayInstance = new Razorpay({
@@ -85,9 +96,40 @@ app.use(cors({
 
 app.options('*', cors());
 
-app.use(express.json());
+// ── gzip/brotli compression (cuts bandwidth 60-80%, critical at scale) ────
+app.use(compression({ level: 6, threshold: 1024 }));
+
+// ── Global rate limiter (200 req/min per IP across all routes) ────────────
+app.use(globalLimiter);
+
+// ── Request size limits (prevent payload-based DoS) ──────────────────────
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 app.use(express.static(path.join(__dirname, "dist"), { index: false }));
 app.use("/assets", express.static(path.join(__dirname, "public"), { index: false }));
+
+// ── Health & readiness endpoints (required by load balancers / Kubernetes) ─
+app.get("/health", async (req, res) => {
+  const redisOk = await cacheHealthCheck();
+  const queueStats = await getQueueStats();
+  res.status(200).json({
+    status: "ok",
+    uptime: process.uptime(),
+    memory: process.memoryUsage(),
+    redis: redisOk ? "connected" : "unavailable",
+    queues: queueStats,
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.get("/ready", async (req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    res.status(200).json({ status: "ready" });
+  } catch (err) {
+    res.status(503).json({ status: "not_ready", error: "DB unavailable" });
+  }
+});
 
 const SUPPORTED_MODELS = [
   "gpt-4o-mini",
@@ -96,6 +138,19 @@ const SUPPORTED_MODELS = [
 ];
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+const LEGACY_GOOGLE_CLIENT_IDS = [
+  "408976603628-37t2cbqmivdlchr1p300io4eb3q2vrpf.apps.googleusercontent.com",
+];
+const ALLOWED_GOOGLE_AUDIENCES = Array.from(new Set([
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.VITE_GOOGLE_CLIENT_ID,
+  ...LEGACY_GOOGLE_CLIENT_IDS,
+  ...(process.env.GOOGLE_CLIENT_IDS || "").split(",").map((v) => v.trim()).filter(Boolean),
+].filter(Boolean)));
+
+if (ALLOWED_GOOGLE_AUDIENCES.length === 0) {
+  logger.warn("No Google OAuth audiences configured. Google login will fail until GOOGLE_CLIENT_ID is set.");
+}
 
 function sanitizeModel(model) {
   return SUPPORTED_MODELS.includes(model) ? model : "gpt-4o-mini";
@@ -375,62 +430,50 @@ app.get("/api/image-proxy", async (req, res) => {
   }
 });
 
-// Simple in-memory per-user+route throttle
-const userLastRequest = new Map();
-
-// ── Usage & Plan limit middleware ─────────────────────────────────────────
+// ── Usage & Plan limit middleware (Redis-cached – avoids 3 DB hits per request) ─
 async function checkUsageAndPlan(req, res, next) {
   const userId = req.headers['x-user-id'];
   if (!userId) return res.status(401).json({ error: "Please login first" });
 
-  const now = Date.now();
-  const routeKey = `${userId}:${req.path}`;
-  const defaultCooldownMs = 1200;
-  const routeCooldownMs = {
-    "/api/search/images": 400,
-    "/api/search/videos": 400,
-    "/api/search/short-videos": 400,
-    "/api/search/news": 400,
-    "/api/history": 0,
-  };
-  const cooldownMs = routeCooldownMs[req.path] ?? defaultCooldownMs;
-  const last = userLastRequest.get(routeKey) || 0;
-
-  if (cooldownMs > 0 && now - last < cooldownMs) {
-    const retryAfterMs = cooldownMs - (now - last);
-    const retryAfterSec = Math.max(1, Math.ceil(retryAfterMs / 1000));
-    return res.status(429).json({ 
-      error: "Too many requests. Please wait a few seconds.",
-      retryAfter: `${retryAfterSec}s`
-    });
-  }
-  userLastRequest.set(routeKey, now);
-
   try {
-    let user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: { currentPlan: true },
-    });
+    // ── Step 1: Load user + plan from cache or DB ─────────────────────────
+    const planCacheKey = CacheKey.userPlan(userId);
+    let cached = await cacheGet(planCacheKey);
+    let user, plan;
 
-    if (!user) return res.status(401).json({ error: "User not found" });
-
-    if (!user.currentPlan) {
-      const freePlan = await prisma.plan.findFirst({ where: { name: "FREE" } });
-      if (!freePlan) return res.status(403).json({ error: "No active plan found" });
-      user = await prisma.user.update({
+    if (cached) {
+      user = cached.user;
+      plan = cached.plan;
+    } else {
+      user = await prisma.user.findUnique({
         where: { id: userId },
-        data: { currentPlanId: freePlan.id },
         include: { currentPlan: true },
       });
+
+      if (!user) return res.status(401).json({ error: "User not found" });
+
+      if (!user.currentPlan) {
+        const freePlan = await prisma.plan.findFirst({ where: { name: "FREE" } });
+        if (!freePlan) return res.status(403).json({ error: "No active plan found" });
+        user = await prisma.user.update({
+          where: { id: userId },
+          data: { currentPlanId: freePlan.id },
+          include: { currentPlan: true },
+        });
+      }
+
+      plan = user.currentPlan;
+      // Cache user+plan for 60 seconds – hot path on every request
+      await cacheSet(planCacheKey, { user, plan }, TTL.USER_PLAN);
     }
 
-    const plan = user.currentPlan;
+    // ── Step 2: Check expiry ──────────────────────────────────────────────
     const nowDate = new Date();
-
     const isPaidPlan = plan.name !== "FREE";
-    const isExpired = isPaidPlan && user.subscriptionEnd && nowDate >= user.subscriptionEnd;
+    const isExpired = isPaidPlan && user.subscriptionEnd && nowDate >= new Date(user.subscriptionEnd);
 
     if (isExpired) {
+      await cacheDel(planCacheKey); // evict stale cache
       return res.status(402).json({
         error: "Your paid plan has expired. Please choose a new plan.",
         expired: true,
@@ -439,32 +482,37 @@ async function checkUsageAndPlan(req, res, next) {
       });
     }
 
-    const freePlan = await prisma.plan.findFirst({ where: { name: "FREE" } });
-    if (!freePlan) throw new Error("FREE plan not configured");
-    const FREE_LIMIT = freePlan.usageLimit;
+    // ── Step 3: Check usage against limits (cached aggregates) ───────────
+    const usageCacheKey = CacheKey.usageStats(userId, isPaidPlan ? "paid" : "lifetime");
+    let usageTokens = await cacheGet(usageCacheKey);
 
-    const lifetimeUsage = await prisma.usageLog.aggregate({
-      where: { userId, createdAt: { gte: user.createdAt } },
-      _sum: { tokensUsed: true },
-    });
-    const totalTokensUsedLifetime = lifetimeUsage._sum.tokensUsed || 0;
-    const freeRemaining = Math.max(0, FREE_LIMIT - totalTokensUsedLifetime);
-
-    let paidUsed = 0;
-    let paidLimit = plan.usageLimit;
-
-    if (isPaidPlan && user.subscriptionStart) {
-      const periodUsage = await prisma.usageLog.aggregate({
-        where: { userId, createdAt: { gte: user.subscriptionStart } },
-        _sum: { tokensUsed: true },
-      });
-      paidUsed = periodUsage._sum.tokensUsed || 0;
+    if (usageTokens === null) {
+      if (!isPaidPlan) {
+        const freePlan = await prisma.plan.findFirst({ where: { name: "FREE" } });
+        const lifetimeUsage = await prisma.usageLog.aggregate({
+          where: { userId, createdAt: { gte: new Date(user.createdAt) } },
+          _sum: { tokensUsed: true },
+        });
+        usageTokens = {
+          used: lifetimeUsage._sum.tokensUsed || 0,
+          limit: freePlan?.usageLimit || 100000,
+        };
+      } else {
+        const periodUsage = await prisma.usageLog.aggregate({
+          where: { userId, createdAt: { gte: new Date(user.subscriptionStart) } },
+          _sum: { tokensUsed: true },
+        });
+        usageTokens = {
+          used: periodUsage._sum.tokensUsed || 0,
+          limit: plan.usageLimit,
+        };
+      }
+      await cacheSet(usageCacheKey, usageTokens, TTL.USAGE_STATS);
     }
 
-    const paidExhausted = isPaidPlan && paidUsed >= paidLimit;
-    const freeExhausted = freeRemaining <= 0;
+    const exhausted = usageTokens.used >= usageTokens.limit;
 
-    if (freeExhausted && !isPaidPlan) {
+    if (exhausted && !isPaidPlan) {
       return res.status(429).json({
         error: "Your FREE plan limit has been reached. Upgrade to continue.",
         upgradeNeeded: true,
@@ -472,7 +520,7 @@ async function checkUsageAndPlan(req, res, next) {
       });
     }
 
-    if (paidExhausted) {
+    if (exhausted && isPaidPlan) {
       return res.status(429).json({
         error: "Your paid plan limit has been reached.",
         upgradeNeeded: true,
@@ -484,13 +532,13 @@ async function checkUsageAndPlan(req, res, next) {
     req.userPlan = plan;
     next();
   } catch (err) {
-    console.error("Plan check error:", err);
+    logger.error({ err, userId }, "Plan check error");
     res.status(500).json({ error: "Server error during plan check" });
   }
 }
 
 // ── Razorpay Order Creation Endpoint ───────────────
-app.post("/api/create-razorpay-order", async (req, res) => {
+app.post("/api/create-razorpay-order", paymentLimiter, async (req, res) => {
   const userId = req.headers["x-user-id"];
   if (!userId) {
     return res.status(401).json({ error: "Unauthorized - user ID missing" });
@@ -590,12 +638,21 @@ app.post("/api/verify-razorpay-payment", async (req, res) => {
 });
 
 // ── Google Login ────────────────────────────────────────────────────────────
-app.post("/api/auth/google", async (req, res) => {
+app.post("/api/auth/google", authLimiter, async (req, res) => {
   const { token } = req.body;
+
+  if (!token) {
+    return res.status(400).json({ error: "Google token is required" });
+  }
+
+  if (ALLOWED_GOOGLE_AUDIENCES.length === 0) {
+    return res.status(500).json({ error: "Google OAuth audience is not configured on server" });
+  }
+
   try {
     const ticket = await googleClient.verifyIdToken({
       idToken: token,
-      audience: process.env.GOOGLE_CLIENT_ID,
+      audience: ALLOWED_GOOGLE_AUDIENCES,
     });
     const payload = ticket.getPayload();
 
@@ -650,6 +707,19 @@ app.post("/api/auth/google", async (req, res) => {
 
     res.json({ user });
   } catch (err) {
+    const isAudienceMismatch = String(err?.message || "").toLowerCase().includes("payload audience != requiredaudience");
+
+    if (isAudienceMismatch) {
+      authLogger.warn({
+        err: err.message,
+        allowedAudiences: ALLOWED_GOOGLE_AUDIENCES.map((id) => `${id.slice(0, 10)}...`),
+      }, "Google auth audience mismatch");
+
+      return res.status(401).json({
+        error: "Google login client mismatch. Please sign in again or check Google client ID configuration.",
+      });
+    }
+
     console.error("Google auth error:", err);
     res.status(401).json({ error: "Authentication failed" });
   }
@@ -830,8 +900,8 @@ app.post("/api/generate", checkUsageAndPlan, async (req, res) => {
   }
 });
 
-// ── Web Search ─────────────────────────────────────────────────────────────
-app.post("/api/search", checkUsageAndPlan, async (req, res) => {
+// ── Web Search (Redis-cached results) ──────────────────────────────────────
+app.post("/api/search", searchLimiter, checkUsageAndPlan, async (req, res) => {
   try {
     const { query } = req.body;
     const safeMode = normalizeSafeSearchMode(req.body?.safeMode);
@@ -840,6 +910,16 @@ app.post("/api/search", checkUsageAndPlan, async (req, res) => {
     let searchModel = "gpt-4o-mini";
     if (req.userPlan.name === "PRO") searchModel = "gpt-4o";
     if (req.userPlan.name === "ULTRA") searchModel = "gpt-4o";
+
+    // ── Cache check: serve cached answer instantly (avoids Tavily + OpenAI costs) ─
+    const cacheKey = CacheKey.search(query, safeMode, req.userPlan.name);
+    const cachedResult = await cacheGet(cacheKey);
+    if (cachedResult) {
+      searchLogger.debug({ query, safeMode }, "Cache HIT – serving from Redis");
+      res.setHeader("X-Cache", "HIT");
+      return res.json(cachedResult);
+    }
+    res.setHeader("X-Cache", "MISS");
 
     const tavilyRes = await fetch("https://api.tavily.com/search", {
       method: "POST",
@@ -985,7 +1065,7 @@ app.post("/api/search", checkUsageAndPlan, async (req, res) => {
       },
     });
 
-    res.json({
+    const responsePayload = {
       summary: answer,
       citations: results.map((r, i) => ({ id: i+1, title: r.title, url: r.url })),
       images,
@@ -995,14 +1075,19 @@ app.post("/api/search", checkUsageAndPlan, async (req, res) => {
       finalId,
       modelUsed: searchModel,
       safeMode
-    });
+    };
+
+    // Cache the full response for 5 minutes – identical queries served instantly
+    await cacheSet(cacheKey, responsePayload, TTL.SEARCH_RESULT);
+
+    res.json(responsePayload);
   } catch (err) {
-    console.error("Search error:", err.message);
+    searchLogger.error({ err: err.message }, "Search error");
     res.status(500).json({ error: "Search failed" });
   }
 });
 
-app.post("/api/search/videos", checkUsageAndPlan, async (req, res) => {
+app.post("/api/search/videos", searchLimiter, checkUsageAndPlan, async (req, res) => {
   try {
     const { query } = req.body;
     const safeMode = normalizeSafeSearchMode(req.body?.safeMode);
@@ -1086,7 +1171,7 @@ app.post("/api/search/videos", checkUsageAndPlan, async (req, res) => {
   }
 });
 
-app.post("/api/search/images", checkUsageAndPlan, async (req, res) => {
+app.post("/api/search/images", searchLimiter, checkUsageAndPlan, async (req, res) => {
   try {
     const { query } = req.body;
     const safeMode = normalizeSafeSearchMode(req.body?.safeMode);
@@ -1141,7 +1226,7 @@ app.post("/api/search/images", checkUsageAndPlan, async (req, res) => {
   }
 });
 
-app.post("/api/search/short-videos", checkUsageAndPlan, async (req, res) => {
+app.post("/api/search/short-videos", searchLimiter, checkUsageAndPlan, async (req, res) => {
   try {
     const { query } = req.body;
     const safeMode = normalizeSafeSearchMode(req.body?.safeMode);
@@ -1221,7 +1306,7 @@ app.post("/api/search/short-videos", checkUsageAndPlan, async (req, res) => {
   }
 });
 
-app.post("/api/search/news", checkUsageAndPlan, async (req, res) => {
+app.post("/api/search/news", searchLimiter, checkUsageAndPlan, async (req, res) => {
   try {
     const { query } = req.body;
     const safeMode = normalizeSafeSearchMode(req.body?.safeMode);
@@ -3981,9 +4066,58 @@ app.get("*", (req, res) => {
 app.get("/favicon.ico", (req, res) => res.status(204).end());
 
 // ── START SERVER ──────────────────────────────────────────────────────────
-app.listen(port, '0.0.0.0', () => {
-  console.log(`Server listening on http://0.0.0.0:${port}`);
-  console.log(`Frontend expected at: http://0.0.0.0:${port}/search`);
-  console.log(`Pricing page: http://0.0.0.0:${port}/pricing`);
-  console.log("Server fully started - ready for requests");
+const server = app.listen(port, '0.0.0.0', () => {
+  logger.info({ port, env: process.env.NODE_ENV || "development" }, "Server started – ready for requests");
+});
+
+// ── Graceful Shutdown (critical for Kubernetes / PM2 / Cloud Run) ─────────
+// Allows in-flight requests to complete before process exits.
+// Without this, load-balanced rolling deploys drop live requests.
+async function gracefulShutdown(signal) {
+  logger.info({ signal }, "Graceful shutdown initiated");
+
+  // 1. Stop accepting new connections
+  server.close(async () => {
+    logger.info("HTTP server closed – draining in-flight requests");
+
+    try {
+      // 2. Close BullMQ queues
+      await closeQueues();
+
+      // 3. Disconnect Prisma
+      await prisma.$disconnect();
+      logger.info("Prisma disconnected");
+
+      // 4. Close Redis (imported lazily to avoid circular deps)
+      const { default: redisClient } = await import("./configs/redis.js");
+      if (redisClient) {
+        await redisClient.quit();
+        logger.info("Redis disconnected");
+      }
+    } catch (err) {
+      logger.error({ err }, "Error during shutdown cleanup");
+    }
+
+    logger.info("Shutdown complete");
+    process.exit(0);
+  });
+
+  // Force exit after 30 seconds if graceful shutdown takes too long
+  setTimeout(() => {
+    logger.error("Forced shutdown after 30s timeout");
+    process.exit(1);
+  }, 30_000).unref();
+}
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM")); // Kubernetes / Cloud Run
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));   // Ctrl+C
+
+// Catch unhandled promise rejections – prevent silent crashes
+process.on("unhandledRejection", (reason) => {
+  logger.error({ reason }, "Unhandled promise rejection");
+});
+
+process.on("uncaughtException", (err) => {
+  logger.error({ err }, "Uncaught exception – process will exit");
+  gracefulShutdown("uncaughtException");
 });

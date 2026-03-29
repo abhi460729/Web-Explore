@@ -1,0 +1,298 @@
+# k8s/deployment.yaml
+# Kubernetes manifests for production deployment.
+# Targeting cloud providers: GKE (Google), EKS (AWS), AKS (Azure) – all compatible.
+#
+# Architecture at scale:
+#   - HPA autoscales app pods from 4 → 50 based on CPU/RPS
+#   - Redis runs as a StatefulSet with PVC for persistence
+#   - Secrets managed via K8s Secrets (or external secret manager)
+#   - Ingress with NGINX Ingress Controller for TLS + rate limiting
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ai-search
+
+---
+# ── Redis StatefulSet ─────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: ai-search
+spec:
+  serviceName: "redis"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          command:
+            - redis-server
+            - --maxmemory 2gb
+            - --maxmemory-policy allkeys-lru
+            - --appendonly yes
+            - --appendfsync everysec
+          ports:
+            - containerPort: 6379
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "3Gi"
+              cpu: "1000m"
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "ping"]
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 20Gi
+
+---
+# Redis Service (ClusterIP – internal only)
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: ai-search
+spec:
+  selector:
+    app: redis
+  ports:
+    - port: 6379
+      targetPort: 6379
+  clusterIP: None  # Headless service for StatefulSet
+
+---
+# ── App Secrets ───────────────────────────────────────────────────────────────
+# In real production, use: External Secrets Operator, AWS Secrets Manager, GCP Secret Manager
+# NEVER commit actual secrets to git. This shows structure only.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+  namespace: ai-search
+type: Opaque
+stringData:
+  DATABASE_URL: "postgresql://user:pass@pgbouncer:5432/dbname"
+  OPENAI_API_KEY: "sk-..."
+  TAVILY_API_KEY: "tvly-..."
+  GOOGLE_CLIENT_ID: "..."
+  GOOGLE_CLIENT_SECRET: "..."
+  RAZORPAY_KEY_ID: "rzp_live_..."
+  RAZORPAY_KEY_SECRET: "..."
+
+---
+# ── App Deployment ────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-search-app
+  namespace: ai-search
+  labels:
+    app: ai-search-app
+    version: "1.0.0"
+spec:
+  replicas: 4                             # Start with 4 – HPA will scale up to 50
+  selector:
+    matchLabels:
+      app: ai-search-app
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 2                         # Create 2 new pods before removing old ones
+      maxUnavailable: 0                   # Never take down a pod during update
+  template:
+    metadata:
+      labels:
+        app: ai-search-app
+    spec:
+      terminationGracePeriodSeconds: 35   # > 30s gracefulShutdown timeout in server.js
+      containers:
+        - name: app
+          image: YOUR_REGISTRY/ai-search-engine:latest  # Replace with your image
+          ports:
+            - containerPort: 8080
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: PORT
+              value: "8080"
+            - name: REDIS_URL
+              value: "redis://redis:6379"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: DATABASE_URL
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: OPENAI_API_KEY
+            - name: TAVILY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: TAVILY_API_KEY
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: GOOGLE_CLIENT_ID
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: GOOGLE_CLIENT_SECRET
+            - name: RAZORPAY_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: RAZORPAY_KEY_ID
+            - name: RAZORPAY_KEY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: app-secrets
+                  key: RAZORPAY_KEY_SECRET
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "2Gi"
+              cpu: "2000m"
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+          lifecycle:
+            preStop:
+              exec:
+                # Give Nginx time to stop routing before SIGTERM reaches the process
+                command: ["/bin/sh", "-c", "sleep 5"]
+
+---
+# ── App Service ───────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-search-app
+  namespace: ai-search
+spec:
+  selector:
+    app: ai-search-app
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+  type: ClusterIP
+
+---
+# ── Horizontal Pod Autoscaler ─────────────────────────────────────────────────
+# Automatically scales pods from 4 to 50 based on CPU load.
+# At Perplexity scale: more traffic → more pods → auto-scaling in ~90 seconds.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: ai-search-hpa
+  namespace: ai-search
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: ai-search-app
+  minReplicas: 4
+  maxReplicas: 50
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60     # Scale up when average CPU > 60%
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30   # Respond quickly to traffic spikes
+      policies:
+        - type: Pods
+          value: 4                     # Add 4 pods at a time
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300  # Wait 5 min before scaling down (avoid flapping)
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 60
+
+---
+# ── Ingress (NGINX Ingress Controller) ───────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ai-search-ingress
+  namespace: ai-search
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/limit-rps: "50"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"    # Auto TLS via cert-manager
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - yourdomain.com
+      secretName: ai-search-tls
+  rules:
+    - host: yourdomain.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: ai-search-app
+                port:
+                  number: 80

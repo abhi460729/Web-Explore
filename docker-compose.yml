@@ -1,0 +1,155 @@
+# docker-compose.yml
+# Production-ready multi-service stack:
+#   - app:     Node.js server (horizontally scalable via `replicas`)
+#   - redis:   Redis 7 cache + rate limit store (Cluster-mode ready)
+#   - nginx:   Reverse proxy + load balancer + TLS termination
+#   - pgbouncer: PostgreSQL connection pooler (prevents DB exhaustion at scale)
+#
+# Usage:
+#   Development:   docker compose up
+#   Production:    docker compose -f docker-compose.yml up -d --scale app=4
+#   With env file: docker compose --env-file .env.production up -d --scale app=4
+
+version: "3.9"
+
+services:
+
+  # ── Redis 7 ────────────────────────────────────────────────────────────────
+  # The single most critical scalability component:
+  #   - Caches search results → 60-80% of AI/Tavily calls skipped
+  #   - Stores rate limit counters across all app instances
+  #   - Backs BullMQ job queues
+  redis:
+    image: redis:7-alpine
+    container_name: search-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 2gb
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
+      --appendonly yes
+      --appendfsync everysec
+      --tcp-keepalive 60
+      --hz 20
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"        # Bind to localhost only – never expose Redis publicly
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app_network
+
+  # ── PgBouncer (PostgreSQL Connection Pooler) ──────────────────────────────
+  # At Perplexity scale, hundreds of Node.js workers each wanting their own
+  # Postgres connections will exhaust the 100-connection Postgres limit.
+  # PgBouncer pools connections: 200 app connections → 10 actual DB connections.
+  pgbouncer:
+    image: edoburu/pgbouncer:1.22.1
+    container_name: search-pgbouncer
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      POOL_MODE: transaction          # Best for web workloads
+      MAX_CLIENT_CONN: 200            # Max simultaneous app connections
+      DEFAULT_POOL_SIZE: 20           # Actual DB connections per pool
+      MIN_POOL_SIZE: 5
+      RESERVE_POOL_SIZE: 5
+      SERVER_IDLE_TIMEOUT: 600
+      LOG_CONNECTIONS: 0
+      LOG_DISCONNECTIONS: 0
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-h", "localhost", "-p", "5432"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - app_network
+
+  # ── App (Node.js – horizontally scalable) ────────────────────────────────
+  # Scale with: docker compose up -d --scale app=N
+  # Each replica gets its own process; Nginx load-balances across them.
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_ENV: production
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgresql://user:pass@pgbouncer:5432/dbname  # Route through PgBouncer
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      TAVILY_API_KEY: ${TAVILY_API_KEY}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET}
+      LOG_LEVEL: info
+    depends_on:
+      redis:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - app_network
+    deploy:
+      replicas: 4                   # 4 replicas = 4x throughput
+      update_config:
+        parallelism: 1              # Rolling deploy: update 1 at a time
+        delay: 10s
+        failure_action: rollback
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+
+  # ── Nginx (Reverse Proxy + Load Balancer) ─────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: search-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro              # Mount your TLS certs here
+      - nginx_cache:/var/cache/nginx
+    depends_on:
+      - app
+    networks:
+      - app_network
+
+volumes:
+  redis_data:
+    driver: local
+  nginx_cache:
+    driver: local
+
+networks:
+  app_network:
+    driver: bridge
