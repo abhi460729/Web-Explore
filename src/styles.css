@@ -1403,6 +1403,165 @@ a:hover {
   text-shadow: inherit;
 }
 
+/* ==================== YANDEX-STYLE SEARCH PAGE ==================== */
+
+.yx-logo-wrap {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 2.2rem;
+}
+
+.yx-logo {
+  font-family: 'Inter', 'Segoe UI', Arial, sans-serif !important;
+  font-weight: 900 !important;
+  font-size: clamp(3.5rem, 9vw, 6rem) !important;
+  letter-spacing: -2px !important;
+  line-height: 1 !important;
+  text-align: center;
+  margin: 0 !important;
+  animation: none !important;
+  text-shadow: none !important;
+  -webkit-text-fill-color: initial !important;
+  color: initial !important;
+}
+
+.yx-logo-first {
+  color: #1d1d1d;
+}
+
+[data-theme="dark"] .yx-logo-first {
+  color: #f0f0f0;
+}
+
+.yx-logo-second {
+  color: #fc3f1d;
+}
+
+/* Yandex-style search form */
+.yx-search-form {
+  width: 100%;
+  max-width: 700px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Row: input box + find button side by side */
+.yx-input-row {
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  border-radius: 24px;
+  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.12);
+}
+
+/* Override input-container when inside Yandex row */
+.yx-input-container {
+  flex: 1;
+  max-width: unset !important;
+}
+
+/* Input itself inside the Yandex layout */
+.yx-input-container input[type="text"] {
+  border-radius: 24px 0 0 24px !important;
+  border-right: none !important;
+  box-shadow: none !important;
+  padding-left: 3rem !important;
+  padding-right: 6.5rem !important;
+  min-height: 3.6rem !important;
+}
+
+.yx-input-container input[type="text"]:focus {
+  box-shadow: none !important;
+  border-color: var(--input-border-focus) !important;
+}
+
+/* Search magnifier icon on the left */
+.yx-search-icon-left {
+  position: absolute;
+  left: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-secondary);
+  pointer-events: none;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+}
+
+/* Utility buttons (model, mic) inside the Yandex input */
+.yx-util-btns {
+  position: absolute;
+  top: 50%;
+  right: 0.5rem;
+  transform: translateY(-50%);
+  display: flex;
+  gap: 0.3rem;
+  z-index: 10;
+  align-items: center;
+}
+
+/* Find button — Yandex red */
+.yx-find-btn {
+  background: #fc3f1d;
+  color: #fff;
+  font-weight: 700;
+  font-size: 1rem;
+  padding: 0 1.8rem;
+  border: none;
+  border-radius: 0 24px 24px 0;
+  cursor: pointer;
+  white-space: nowrap;
+  min-height: 3.6rem;
+  transition: background 0.15s ease;
+  flex-shrink: 0;
+  letter-spacing: 0.2px;
+}
+
+.yx-find-btn:hover {
+  background: #e53510;
+}
+
+.yx-find-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Mode tabs below the search bar */
+.yx-mode-row {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1.2rem;
+  align-items: center;
+}
+
+.yx-mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.42rem 1.1rem;
+  border-radius: 999px;
+  border: 1.5px solid var(--card-border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  line-height: 1.3;
+}
+
+.yx-mode-btn:hover {
+  background: var(--followup-bg);
+  color: var(--text-primary);
+}
+
+.yx-mode-btn.active {
+  background: #fc3f1d;
+  color: #fff;
+  border-color: #fc3f1d;
+}
+
 /* ==================== AI LOADING ANIMATION ==================== */
 .ai-loading-wrap {
   display: flex;

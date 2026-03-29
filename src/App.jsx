@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
 import debounce from "lodash/debounce";
 import DOMPurify from "dompurify";
-import { Plus, User, X, Bot, Globe, Mic, Sun, Moon, Check, Zap, ArrowLeft, History, ChevronDown, ChevronRight } from "lucide-react";
+import { Plus, User, X, Bot, Globe, Mic, Sun, Moon, Check, Zap, ArrowLeft, History, ChevronDown, ChevronRight, Search } from "lucide-react";
 import { jsPDF } from "jspdf";
 import { v4 as uuidv4 } from "uuid";
 
@@ -4204,117 +4204,151 @@ function App() {
         <div className={`full-width-container${response ? " has-response" : ""}`}>
           {location.pathname === "/search" && (
             <>
-              <h1 className={doodle.className}>{doodle.text}</h1>
-              <form onSubmit={handleSubmit} className="w-full max-w-2xl">
-                <div className="input-container">
-                  <input
-                    type="text"
-                    value={prompt}
-                    onChange={(e) => {
-                      const nextValue = e.target.value;
-                      setPrompt(nextValue);
-                      setShowQuerySuggestions(true);
-                      setActiveSuggestionIndex(-1);
-                      debouncedFetchSuggestions(nextValue);
-                    }}
-                    onFocus={() => {
-                      setShowQuerySuggestions(true);
-                      if (prompt.trim().length >= 2) {
-                        debouncedFetchSuggestions(prompt);
-                      }
-                    }}
-                    onBlur={() => {
-                      setTimeout(() => setShowQuerySuggestions(false), 120);
-                    }}
-                    onKeyDown={(e) => {
-                      if (!showQuerySuggestions) {
-                        if (e.key === "Enter") handleSubmit(e);
-                        return;
-                      }
+              {/* Yandex-style logo */}
+              <div className="yx-logo-wrap">
+                <h1 className={`yx-logo ${doodle.className}`}>
+                  <span className="yx-logo-first">Web</span>
+                  <span className="yx-logo-second"> Explore</span>
+                  {doodle.text.slice(11) /* emoji suffix e.g. " 🎄" */}
+                </h1>
+              </div>
 
-                      const hasSuggestions = querySuggestions.length > 0;
-
-                      if (e.key === "ArrowDown" && hasSuggestions) {
-                        e.preventDefault();
-                        setActiveSuggestionIndex((prev) => (prev + 1) % querySuggestions.length);
-                        return;
-                      }
-
-                      if (e.key === "ArrowUp" && hasSuggestions) {
-                        e.preventDefault();
-                        setActiveSuggestionIndex((prev) => (prev <= 0 ? querySuggestions.length - 1 : prev - 1));
-                        return;
-                      }
-
-                      if (e.key === "Escape") {
-                        setShowQuerySuggestions(false);
+              {/* Yandex-style search form */}
+              <form onSubmit={handleSubmit} className="yx-search-form">
+                <div className="yx-input-row">
+                  <div className="input-container yx-input-container">
+                    <span className="yx-search-icon-left" aria-hidden="true">
+                      <Search size={18} />
+                    </span>
+                    <input
+                      type="text"
+                      value={prompt}
+                      onChange={(e) => {
+                        const nextValue = e.target.value;
+                        setPrompt(nextValue);
+                        setShowQuerySuggestions(true);
                         setActiveSuggestionIndex(-1);
-                        return;
-                      }
+                        debouncedFetchSuggestions(nextValue);
+                      }}
+                      onFocus={() => {
+                        setShowQuerySuggestions(true);
+                        if (prompt.trim().length >= 2) {
+                          debouncedFetchSuggestions(prompt);
+                        }
+                      }}
+                      onBlur={() => {
+                        setTimeout(() => setShowQuerySuggestions(false), 120);
+                      }}
+                      onKeyDown={(e) => {
+                        if (!showQuerySuggestions) {
+                          if (e.key === "Enter") handleSubmit(e);
+                          return;
+                        }
 
-                      if (e.key === "Enter" && hasSuggestions && activeSuggestionIndex >= 0) {
-                        e.preventDefault();
-                        handleSelectAutocompleteSuggestion(querySuggestions[activeSuggestionIndex], true);
-                        return;
-                      }
+                        const hasSuggestions = querySuggestions.length > 0;
 
-                      if (e.key === "Enter") {
-                        handleSubmit(e);
-                      }
-                    }}
-                    placeholder="How can I help you?"
-                    disabled={loading}
-                  />
-                  {showQuerySuggestions && (querySuggestionsLoading || querySuggestions.length > 0) && (
-                    <div className="query-suggestions-dropdown">
-                      {querySuggestionsLoading ? (
-                        <div className="query-suggestion-item loading">Fetching suggestions...</div>
-                      ) : (
-                        querySuggestions.map((suggestion, idx) => (
-                          <button
-                            key={`${suggestion}-${idx}`}
-                            type="button"
-                            className={`query-suggestion-item ${activeSuggestionIndex === idx ? "active" : ""}`}
-                            onMouseEnter={() => setActiveSuggestionIndex(idx)}
-                            onMouseDown={(event) => {
-                              event.preventDefault();
-                              handleSelectAutocompleteSuggestion(suggestion, false);
-                            }}
-                          >
-                            {suggestion}
-                          </button>
-                        ))
-                      )}
-                    </div>
-                  )}
-                  <div className="input-buttons">
-                    <div className={`model-dropdown ${isModelDropdownOpen ? "open" : ""}`}>
-                      <button className="input-btn" onClick={toggleModelDropdown}>
-                        <Bot size={12} />
-                      </button>
-                      <div className="model-dropdown-content">
-                        {models.map((model) => (
-                          <button
-                            key={model}
-                            className={selectedModel === model ? "model-option selected" : "model-option"}
-                            onClick={() => selectModel(model)}
-                          >
-                            {model}
-                          </button>
-                        ))}
+                        if (e.key === "ArrowDown" && hasSuggestions) {
+                          e.preventDefault();
+                          setActiveSuggestionIndex((prev) => (prev + 1) % querySuggestions.length);
+                          return;
+                        }
+
+                        if (e.key === "ArrowUp" && hasSuggestions) {
+                          e.preventDefault();
+                          setActiveSuggestionIndex((prev) => (prev <= 0 ? querySuggestions.length - 1 : prev - 1));
+                          return;
+                        }
+
+                        if (e.key === "Escape") {
+                          setShowQuerySuggestions(false);
+                          setActiveSuggestionIndex(-1);
+                          return;
+                        }
+
+                        if (e.key === "Enter" && hasSuggestions && activeSuggestionIndex >= 0) {
+                          e.preventDefault();
+                          handleSelectAutocompleteSuggestion(querySuggestions[activeSuggestionIndex], true);
+                          return;
+                        }
+
+                        if (e.key === "Enter") {
+                          handleSubmit(e);
+                        }
+                      }}
+                      placeholder="Search with Web Explore"
+                      disabled={loading}
+                    />
+                    {showQuerySuggestions && (querySuggestionsLoading || querySuggestions.length > 0) && (
+                      <div className="query-suggestions-dropdown">
+                        {querySuggestionsLoading ? (
+                          <div className="query-suggestion-item loading">Fetching suggestions...</div>
+                        ) : (
+                          querySuggestions.map((suggestion, idx) => (
+                            <button
+                              key={`${suggestion}-${idx}`}
+                              type="button"
+                              className={`query-suggestion-item ${activeSuggestionIndex === idx ? "active" : ""}`}
+                              onMouseEnter={() => setActiveSuggestionIndex(idx)}
+                              onMouseDown={(event) => {
+                                event.preventDefault();
+                                handleSelectAutocompleteSuggestion(suggestion, false);
+                              }}
+                            >
+                              {suggestion}
+                            </button>
+                          ))
+                        )}
                       </div>
+                    )}
+                    <div className="yx-util-btns">
+                      <div className={`model-dropdown ${isModelDropdownOpen ? "open" : ""}`}>
+                        <button type="button" className="input-btn" onClick={toggleModelDropdown}>
+                          <Bot size={12} />
+                        </button>
+                        <div className="model-dropdown-content">
+                          {models.map((model) => (
+                            <button
+                              key={model}
+                              className={selectedModel === model ? "model-option selected" : "model-option"}
+                              onClick={() => selectModel(model)}
+                            >
+                              {model}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className={`input-btn ${listening ? "bg-red-500" : ""}`}
+                        onClick={handleMicClick}
+                      >
+                        <Mic size={12} />
+                      </button>
                     </div>
-                    <button
-                      className="input-btn"
-                      onClick={() => setMode(mode === "search" ? "ai" : "search")}
-                      title={modes.find((m) => m.key !== mode)?.label}
-                    >
-                      <Globe size={12} />
-                    </button>
-                    <button className={`input-btn ${listening ? "bg-red-500" : ""}`} onClick={handleMicClick}>
-                      <Mic size={12} />
-                    </button>
                   </div>
+                  <button type="submit" className="yx-find-btn" disabled={loading}>
+                    Find
+                  </button>
+                </div>
+
+                {/* Mode tabs below the search bar */}
+                <div className="yx-mode-row">
+                  <button
+                    type="button"
+                    className={`yx-mode-btn ${mode === "search" ? "active" : ""}`}
+                    onClick={() => setMode("search")}
+                  >
+                    <Globe size={13} />
+                    Web
+                  </button>
+                  <button
+                    type="button"
+                    className={`yx-mode-btn ${mode === "ai" ? "active" : ""}`}
+                    onClick={() => setMode("ai")}
+                  >
+                    <Bot size={13} />
+                    AI Answer
+                  </button>
                 </div>
               </form>
             </>
