@@ -36,7 +36,7 @@ COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --chown=appuser:appgroup . .
 
 # Remove devDep source files not needed at runtime
-RUN rm -rf src/ public/ *.config.{js,cjs,ts} postcss.config.cjs tailwind.config.js \
+RUN rm -rf src/ *.config.{js,cjs,ts} postcss.config.cjs tailwind.config.js \
     hf_*.js index.js taivley-test.js test_*.cjs
 
 USER appuser

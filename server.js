@@ -4040,9 +4040,18 @@ app.get("/api/history", checkUsageAndPlan, async (req, res) => {
 
 // ── SPA Routes ────────────────────────────────────────────────────────────
 app.get("/", (req, res) => {
-  const p = path.join(__dirname, "public", "index.html");
-  if (!existsSync(p)) return res.status(404).send("Homepage not found");
-  res.sendFile(p);
+  const publicHomepage = path.join(__dirname, "public", "index.html");
+  const builtHomepage = path.join(__dirname, "dist", "index.html");
+
+  if (existsSync(publicHomepage)) {
+    return res.sendFile(publicHomepage);
+  }
+
+  if (existsSync(builtHomepage)) {
+    return res.sendFile(builtHomepage);
+  }
+
+  return res.status(404).send("Homepage not found");
 });
 
 app.get("/search", (req, res) => {

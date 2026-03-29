@@ -75,3 +75,23 @@ try {
 }
 
 export default redisClient;
+
+// BullMQ connection options – MUST have maxRetriesPerRequest: null
+// (BullMQ uses blocking commands; per-request retries are incompatible)
+export const bullmqConnection = REDIS_URL
+  ? {
+      url: REDIS_URL,
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
+      ...(isTLS && { tls: { rejectUnauthorized: false } }),
+    }
+  : REDIS_REQUIRED
+  ? {
+      host: REDIS_HOST,
+      port: REDIS_PORT,
+      password: REDIS_PASSWORD,
+      db: REDIS_DB,
+      maxRetriesPerRequest: null,
+      enableReadyCheck: false,
+    }
+  : null;

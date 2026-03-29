@@ -16,13 +16,12 @@
 //   └──────────┘   result SSE   └──────────────┘   job result  └──────────────────┘
 
 import { Queue, Worker, QueueEvents } from "bullmq";
-import redisClient from "../configs/redis.js";
+import redisClient, { bullmqConnection } from "../configs/redis.js";
 import logger, { queueLogger } from "../utils/logger.js";
 
-// Only initialise queues when Redis is available
-const connection = redisClient
-  ? redisClient
-  : null;
+// BullMQ needs its own connection options (maxRetriesPerRequest: null)
+// Do NOT pass the shared redisClient here
+const connection = bullmqConnection;
 
 // ── Queue Definitions ─────────────────────────────────────────────────────
 
@@ -103,7 +102,7 @@ export async function closeQueues() {
 
 // ── Log queue events in production ───────────────────────────────────────
 if (searchQueue && process.env.NODE_ENV === "production") {
-  const searchEvents = new QueueEvents("ai-search", { connection });
+  const searchEvents = new QueueEvents("ai-search", { connection: bullmqConnection });
   searchEvents.on("failed", ({ jobId, failedReason }) => {
     queueLogger.error({ jobId, failedReason }, "Search job failed");
   });
