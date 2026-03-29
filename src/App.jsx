@@ -288,6 +288,10 @@ function App() {
   const [recentHistoryLoading, setRecentHistoryLoading] = useState(false);
   const [recentHistoryError, setRecentHistoryError] = useState("");
   const [expandedHistoryId, setExpandedHistoryId] = useState(null);
+  const [querySuggestions, setQuerySuggestions] = useState([]);
+  const [showQuerySuggestions, setShowQuerySuggestions] = useState(false);
+  const [querySuggestionsLoading, setQuerySuggestionsLoading] = useState(false);
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
   const [expandedProfileSection, setExpandedProfileSection] = useState("account");
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("answer");
@@ -382,6 +386,47 @@ function App() {
       setRecentHistoryLoading(false);
     }
   }, [user?.id]);
+
+  const fetchAutocompleteSuggestions = useCallback(async (rawValue) => {
+    const query = String(rawValue || "").trim();
+
+    if (query.length < 2) {
+      setQuerySuggestions([]);
+      setQuerySuggestionsLoading(false);
+      return;
+    }
+
+    setQuerySuggestionsLoading(true);
+
+    try {
+      const res = await fetch(`/api/autocomplete?q=${encodeURIComponent(query)}`, {
+        headers: {
+          "x-user-id": user?.id || "",
+        },
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        setQuerySuggestions([]);
+        return;
+      }
+
+      const suggestions = Array.isArray(data?.suggestions) ? data.suggestions : [];
+      setQuerySuggestions(suggestions);
+      setActiveSuggestionIndex(-1);
+    } catch {
+      setQuerySuggestions([]);
+    } finally {
+      setQuerySuggestionsLoading(false);
+    }
+  }, [user?.id]);
+
+  const debouncedFetchSuggestions = useCallback(
+    debounce((value) => {
+      fetchAutocompleteSuggestions(value);
+    }, 220),
+    [fetchAutocompleteSuggestions]
+  );
 
   const handleUpgradePlanClick = (e) => {
     e?.preventDefault?.();
@@ -874,6 +919,12 @@ function App() {
   }, [location.pathname]);
 
   useEffect(() => {
+    return () => {
+      debouncedFetchSuggestions.cancel();
+    };
+  }, [debouncedFetchSuggestions]);
+
+  useEffect(() => {
     if (!isRecentSidebarOpen || activeLeftPaneTab !== "recent") return;
     fetchRecentHistory();
   }, [isRecentSidebarOpen, activeLeftPaneTab, location.pathname, fetchRecentHistory]);
@@ -926,8 +977,6 @@ function App() {
 
     return "";
   };
-
-  const debouncedSetPrompt = useCallback(debounce((value) => setPrompt(value), 300), []);
 
   const connectGoogleTool = async (tool) => {
 
@@ -1303,6 +1352,20 @@ function App() {
   };
 
   const runHistoryEntry = (entry) => {
+
+      const handleSelectAutocompleteSuggestion = (suggestion, shouldSubmit = true) => {
+        const nextValue = String(suggestion || "").trim();
+        if (!nextValue) return;
+
+        setPrompt(nextValue);
+        setShowQuerySuggestions(false);
+        setQuerySuggestions([]);
+        setActiveSuggestionIndex(-1);
+
+        if (shouldSubmit) {
+          handleSubmit(null, nextValue, mode);
+        }
+      };
     const query = String(entry?.inputText || "").trim();
     if (!query) return;
 
@@ -1345,6 +1408,9 @@ function App() {
     setLoading(true);
     setError("");
     setResponse(null);
+    setShowQuerySuggestions(false);
+    setQuerySuggestions([]);
+    setActiveSuggestionIndex(-1);
     setActiveTab("answer");
     setImageResults([]);
     setImageResultsQuery("");
@@ -4143,11 +4209,82 @@ function App() {
                   <input
                     type="text"
                     value={prompt}
-                    onChange={(e) => debouncedSetPrompt(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleSubmit(e)}
+                    onChange={(e) => {
+                      const nextValue = e.target.value;
+                      setPrompt(nextValue);
+                      setShowQuerySuggestions(true);
+                      setActiveSuggestionIndex(-1);
+                      debouncedFetchSuggestions(nextValue);
+                    }}
+                    onFocus={() => {
+                      setShowQuerySuggestions(true);
+                      if (prompt.trim().length >= 2) {
+                        debouncedFetchSuggestions(prompt);
+                      }
+                    }}
+                    onBlur={() => {
+                      setTimeout(() => setShowQuerySuggestions(false), 120);
+                    }}
+                    onKeyDown={(e) => {
+                      if (!showQuerySuggestions) {
+                        if (e.key === "Enter") handleSubmit(e);
+                        return;
+                      }
+
+                      const hasSuggestions = querySuggestions.length > 0;
+
+                      if (e.key === "ArrowDown" && hasSuggestions) {
+                        e.preventDefault();
+                        setActiveSuggestionIndex((prev) => (prev + 1) % querySuggestions.length);
+                        return;
+                      }
+
+                      if (e.key === "ArrowUp" && hasSuggestions) {
+                        e.preventDefault();
+                        setActiveSuggestionIndex((prev) => (prev <= 0 ? querySuggestions.length - 1 : prev - 1));
+                        return;
+                      }
+
+                      if (e.key === "Escape") {
+                        setShowQuerySuggestions(false);
+                        setActiveSuggestionIndex(-1);
+                        return;
+                      }
+
+                      if (e.key === "Enter" && hasSuggestions && activeSuggestionIndex >= 0) {
+                        e.preventDefault();
+                        handleSelectAutocompleteSuggestion(querySuggestions[activeSuggestionIndex], true);
+                        return;
+                      }
+
+                      if (e.key === "Enter") {
+                        handleSubmit(e);
+                      }
+                    }}
                     placeholder="How can I help you?"
                     disabled={loading}
                   />
+                  {showQuerySuggestions && (querySuggestionsLoading || querySuggestions.length > 0) && (
+                    <div className="query-suggestions-dropdown">
+                      {querySuggestionsLoading ? (
+                        <div className="query-suggestion-item loading">Fetching suggestions...</div>
+                      ) : (
+                        querySuggestions.map((suggestion, idx) => (
+                          <button
+                            key={`${suggestion}-${idx}`}
+                            type="button"
+                            className={`query-suggestion-item ${activeSuggestionIndex === idx ? "active" : ""}`}
+                            onMouseDown={(event) => {
+                              event.preventDefault();
+                              handleSelectAutocompleteSuggestion(suggestion, true);
+                            }}
+                          >
+                            {suggestion}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
                   <div className="input-buttons">
                     <div className={`model-dropdown ${isModelDropdownOpen ? "open" : ""}`}>
                       <button className="input-btn" onClick={toggleModelDropdown}>

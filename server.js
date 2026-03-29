@@ -898,6 +898,46 @@ app.post("/api/generate", searchLimiter, checkUsageAndPlan, async (req, res) => 
   }
 });
 
+// ── Search Autocomplete Suggestions ───────────────────────────────────────
+app.get("/api/autocomplete", async (req, res) => {
+  const query = String(req.query?.q || "").trim();
+
+  if (query.length < 2) {
+    return res.json({ suggestions: [] });
+  }
+
+  try {
+    const suggestionRes = await fetch(
+      `https://suggestqueries.google.com/complete/search?client=firefox&q=${encodeURIComponent(query)}`,
+      {
+        headers: {
+          "User-Agent": "Mozilla/5.0",
+          "Accept": "application/json",
+        },
+      }
+    );
+
+    if (!suggestionRes.ok) {
+      throw new Error(`Autocomplete provider failed: ${suggestionRes.status}`);
+    }
+
+    const payload = await suggestionRes.json();
+    const rawSuggestions = Array.isArray(payload?.[1]) ? payload[1] : [];
+    const suggestions = Array.from(
+      new Set(
+        rawSuggestions
+          .map((item) => String(item || "").trim())
+          .filter((item) => item.length > 0)
+      )
+    ).slice(0, 8);
+
+    return res.json({ suggestions });
+  } catch (err) {
+    logger.warn({ err, query }, "Autocomplete fetch failed");
+    return res.json({ suggestions: [] });
+  }
+});
+
 // ── Web Search (Redis-cached results) ──────────────────────────────────────
 app.post("/api/search", searchLimiter, checkUsageAndPlan, async (req, res) => {
   try {

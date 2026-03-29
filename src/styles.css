@@ -153,6 +153,44 @@ form {
   max-width: 640px;
 }
 
+.query-suggestions-dropdown {
+  position: absolute;
+  top: calc(100% + 0.45rem);
+  left: 0;
+  right: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-md);
+  z-index: 40;
+  max-height: 280px;
+  overflow-y: auto;
+  padding: 0.3rem;
+}
+
+.query-suggestion-item {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  padding: 0.58rem 0.7rem;
+  border-radius: 10px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  line-height: 1.35;
+}
+
+.query-suggestion-item:hover,
+.query-suggestion-item.active {
+  background: var(--followup-bg);
+}
+
+.query-suggestion-item.loading {
+  color: var(--text-secondary);
+  cursor: default;
+}
+
 input[type="text"] {
   font-size: 1.05rem;
   background-color: var(--input-bg);
