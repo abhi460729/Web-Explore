@@ -1,5 +1,5 @@
 # ── Stage 1: Build (installs ALL deps, compiles frontend) ────────────────────
-FROM node:20-alpine AS builder
+FROM node:20-bookworm-slim AS builder
 
 WORKDIR /app
 
@@ -17,12 +17,15 @@ RUN npx prisma generate
 
 
 # ── Stage 2: Production image (lean, no devDeps) ─────────────────────────────
-FROM node:20-alpine AS production
+FROM node:20-bookworm-slim AS production
 
 WORKDIR /app
 
 # Security: run as non-root user
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+  && rm -rf /var/lib/apt/lists/* \
+  && groupadd -r appgroup \
+  && useradd -r -g appgroup appuser
 
 # Copy production deps only
 COPY package*.json ./
@@ -49,7 +52,7 @@ EXPOSE 8080
 
 # Health check so orchestrators know when the container is ready
 HEALTHCHECK --interval=15s --timeout=10s --start-period=30s --retries=3 \
-  CMD wget -qO- http://localhost:8080/health || exit 1
+  CMD curl -fsS http://localhost:8080/health || exit 1
 
 # Graceful shutdown: use JSON array (exec form) to receive SIGTERM correctly
 CMD ["node", "server.js"]
