@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect } from "react";
 import { useParams, useLocation, useNavigate } from "react-router-dom";
 import debounce from "lodash/debounce";
 import DOMPurify from "dompurify";
-import { Plus, User, X, Bot, Globe, Mic, Sun, Moon, Check, Zap, ArrowLeft, History, ChevronDown, ChevronRight, Search } from "lucide-react";
+import { Plus, User, X, Bot, Globe, Mic, Sun, Moon, Check, Zap, ArrowLeft, History, ChevronDown, ChevronRight, Search, Link, Share2, Download } from "lucide-react";
 import { jsPDF } from "jspdf";
 import { v4 as uuidv4 } from "uuid";
 
@@ -293,6 +293,7 @@ function App() {
   const [querySuggestionsLoading, setQuerySuggestionsLoading] = useState(false);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
   const [expandedProfileSection, setExpandedProfileSection] = useState("account");
+  const [copyLinkSuccess, setCopyLinkSuccess] = useState(false);
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("answer");
   const [safeSearchByTab, setSafeSearchByTab] = useState(() => normalizeSafeSearchByTab(localStorage.getItem("safeSearchByTab")));
@@ -1349,6 +1350,38 @@ function App() {
   const handleAutomateWorkflows = () => {
     navigate("/workflows");
     setIsProfileSidebarOpen(false);
+  };
+
+  const handleCopyLink = () => {
+    navigator.clipboard.writeText(window.location.href).then(() => {
+      setCopyLinkSuccess(true);
+      setTimeout(() => setCopyLinkSuccess(false), 2000);
+    }).catch(() => {});
+  };
+
+  const handleShareResult = () => {
+    if (navigator.share) {
+      navigator.share({
+        title: document.title,
+        url: window.location.href,
+      }).catch(() => {});
+    } else {
+      handleCopyLink();
+    }
+  };
+
+  const handleDownloadAnswer = () => {
+    const text = mode === "ai" ? (response?.text || "") : (response?.summary || "");
+    if (!text) return;
+    const query = activeSearchQuery || "answer";
+    const filename = query.slice(0, 48).replace(/[^a-z0-9]+/gi, "-").toLowerCase() + ".txt";
+    const blob = new Blob([text], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleSelectAutocompleteSuggestion = (suggestion, shouldSubmit = false) => {
@@ -4372,6 +4405,34 @@ function App() {
                   {decodeURIComponent(queryParam)}
                 </h2>
               )}
+              {/* Perplexity-style action buttons */}
+              <div className="result-actions-bar">
+                <button
+                  className="result-action-btn"
+                  onClick={handleCopyLink}
+                  title="Copy link"
+                >
+                  {copyLinkSuccess ? <Check size={14} /> : <Link size={14} />}
+                  <span>{copyLinkSuccess ? "Copied!" : "Copy Link"}</span>
+                </button>
+                <button
+                  className="result-action-btn"
+                  onClick={handleShareResult}
+                  title="Share"
+                >
+                  <Share2 size={14} />
+                  <span>Share</span>
+                </button>
+                <button
+                  className="result-action-btn"
+                  onClick={handleDownloadAnswer}
+                  title="Download answer as text"
+                  disabled={!(mode === "ai" ? response?.text : response?.summary)}
+                >
+                  <Download size={14} />
+                  <span>Download</span>
+                </button>
+              </div>
               <div className="tabs">
                 <button className={`tab ${activeTab === "answer" ? "active" : ""}`} onClick={() => showTab("answer")}>
                   Answer
