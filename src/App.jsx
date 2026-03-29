@@ -14,6 +14,116 @@ if (recognition) {
   recognition.lang = "en-US";
 }
 
+const SAFE_SEARCH_OPTIONS = [
+  { key: "strict", label: "Filter" },
+  { key: "blur", label: "Blur" },
+  { key: "off", label: "Off" },
+];
+
+const DEFAULT_SAFE_SEARCH_BY_TAB = {
+  images: "strict",
+  videos: "strict",
+  shortVideos: "strict",
+  news: "strict",
+};
+
+const SENSITIVE_PATTERN = /\b(?:porn|xxx|sex|nude|naked|escort|erotic|adult|nsfw|fetish|camgirl|onlyfans|hentai|hardcore|milf|bdsm|anal)\b/i;
+const BLOCKED_MEDIA_DOMAINS = [
+  "pornhub.com",
+  "xvideos.com",
+  "xnxx.com",
+  "xhamster.com",
+  "redtube.com",
+  "spankbang.com",
+  "youporn.com",
+  "tube8.com",
+  "rule34",
+  "onlyfans.com",
+  "hentai",
+];
+
+function normalizeSafeMode(mode) {
+  const normalized = String(mode || "").toLowerCase();
+  return ["strict", "blur", "off"].includes(normalized) ? normalized : "strict";
+}
+
+function normalizeSafeSearchByTab(rawValue) {
+  if (!rawValue) return DEFAULT_SAFE_SEARCH_BY_TAB;
+
+  try {
+    const parsed = JSON.parse(rawValue);
+    return {
+      images: normalizeSafeMode(parsed?.images),
+      videos: normalizeSafeMode(parsed?.videos),
+      shortVideos: normalizeSafeMode(parsed?.shortVideos),
+      news: normalizeSafeMode(parsed?.news),
+    };
+  } catch {
+    return DEFAULT_SAFE_SEARCH_BY_TAB;
+  }
+}
+
+function isSensitiveValue(value = "") {
+  const text = String(value || "").toLowerCase();
+  if (!text) return false;
+  if (SENSITIVE_PATTERN.test(text)) return true;
+  return BLOCKED_MEDIA_DOMAINS.some((domain) => text.includes(domain));
+}
+
+function isInstagramHostedUrl(rawUrl = "") {
+  try {
+    const parsed = new URL(String(rawUrl || ""));
+    const host = parsed.hostname.toLowerCase();
+    return host.includes("instagram.com") || host.includes("cdninstagram.com") || host.includes("fbcdn.net") || host.includes("scontent");
+  } catch {
+    return false;
+  }
+}
+
+function getImageRenderUrl(rawUrl = "") {
+  if (!rawUrl) return "";
+  try {
+    const parsed = new URL(rawUrl);
+    const host = parsed.hostname.toLowerCase();
+    const path = parsed.pathname.toLowerCase();
+
+    if (host.includes("instagram.com") && (/^\/p\//.test(path) || /^\/reel\//.test(path) || /^\/tv\//.test(path))) {
+      return `/api/instagram/resolve-image?url=${encodeURIComponent(rawUrl)}`;
+    }
+  } catch {
+    // Keep fallback behavior for malformed URLs
+  }
+
+  if (isInstagramHostedUrl(rawUrl)) {
+    return `/api/image-proxy?url=${encodeURIComponent(rawUrl)}`;
+  }
+  return rawUrl;
+}
+
+function normalizeImageItem(item, forceSensitive = false) {
+  if (typeof item === "string") {
+    const url = item.trim();
+    if (!url) return null;
+    return {
+      url,
+      renderUrl: getImageRenderUrl(url),
+      isSensitive: forceSensitive || isSensitiveValue(url),
+    };
+  }
+
+  if (item && typeof item === "object") {
+    const url = String(item.url || item.image_url || item.src || "").trim();
+    if (!url) return null;
+    return {
+      url,
+      renderUrl: getImageRenderUrl(url),
+      isSensitive: forceSensitive || Boolean(item.isSensitive || item.sensitive) || isSensitiveValue(`${url} ${item.reason || ""}`),
+    };
+  }
+
+  return null;
+}
+
 const loadImageAsDataUrl = (url) => new Promise((resolve) => {
   if (!url) {
     resolve(null);
@@ -174,6 +284,7 @@ function App() {
   const [isProfileSidebarOpen, setIsProfileSidebarOpen] = useState(false);
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("answer");
+  const [safeSearchByTab, setSafeSearchByTab] = useState(() => normalizeSafeSearchByTab(localStorage.getItem("safeSearchByTab")));
   const [imageResults, setImageResults] = useState([]);
   const [imageResultsQuery, setImageResultsQuery] = useState("");
   const [imagesLoading, setImagesLoading] = useState(false);
@@ -616,6 +727,10 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
+    localStorage.setItem("safeSearchByTab", JSON.stringify(safeSearchByTab));
+  }, [safeSearchByTab]);
+
+  useEffect(() => {
 
     const fetchIntegrations = async () => {
 
@@ -931,15 +1046,16 @@ function App() {
     return wordCount <= 20;
   }
 
-  const fetchImageResults = async (rawQuery) => {
+  const fetchImageResults = async (rawQuery, selectedMode = safeSearchByTab.images) => {
     const effectiveQuery = String(rawQuery || "").trim();
+    const cacheKey = `${effectiveQuery}::${selectedMode}`;
     if (!effectiveQuery) {
       setImageResults([]);
       setImageResultsQuery("");
       return;
     }
 
-    if (imageResultsQuery === effectiveQuery && imageResults.length > 0) {
+    if (imageResultsQuery === cacheKey && imageResults.length > 0) {
       return;
     }
 
@@ -951,7 +1067,7 @@ function App() {
           "Content-Type": "application/json",
           "x-user-id": user?.id || "",
         },
-        body: JSON.stringify({ query: effectiveQuery }),
+        body: JSON.stringify({ query: effectiveQuery, safeMode: selectedMode }),
       });
 
       const data = await res.json();
@@ -961,25 +1077,26 @@ function App() {
       }
 
       setImageResults(Array.isArray(data.images) ? data.images : []);
-      setImageResultsQuery(effectiveQuery);
+      setImageResultsQuery(cacheKey);
     } catch (err) {
       console.error("Failed to fetch images:", err);
       setImageResults([]);
-      setImageResultsQuery(effectiveQuery);
+      setImageResultsQuery(cacheKey);
     } finally {
       setImagesLoading(false);
     }
   };
 
-  const fetchVideoResults = async (rawQuery) => {
+  const fetchVideoResults = async (rawQuery, selectedMode = safeSearchByTab.videos) => {
     const effectiveQuery = String(rawQuery || "").trim();
+    const cacheKey = `${effectiveQuery}::${selectedMode}`;
     if (!effectiveQuery) {
       setVideoResults([]);
       setVideoResultsQuery("");
       return;
     }
 
-    if (videoResultsQuery === effectiveQuery && videoResults.length > 0) {
+    if (videoResultsQuery === cacheKey && videoResults.length > 0) {
       return;
     }
 
@@ -991,7 +1108,7 @@ function App() {
           "Content-Type": "application/json",
           "x-user-id": user?.id || "",
         },
-        body: JSON.stringify({ query: effectiveQuery }),
+        body: JSON.stringify({ query: effectiveQuery, safeMode: selectedMode }),
       });
 
       const data = await res.json();
@@ -1001,25 +1118,26 @@ function App() {
       }
 
       setVideoResults(data.videos || []);
-      setVideoResultsQuery(effectiveQuery);
+      setVideoResultsQuery(cacheKey);
     } catch (err) {
       console.error("Failed to fetch videos:", err);
       setVideoResults([]);
-      setVideoResultsQuery(effectiveQuery);
+      setVideoResultsQuery(cacheKey);
     } finally {
       setVideosLoading(false);
     }
   };
 
-  const fetchShortVideoResults = async (rawQuery) => {
+  const fetchShortVideoResults = async (rawQuery, selectedMode = safeSearchByTab.shortVideos) => {
     const effectiveQuery = String(rawQuery || "").trim();
+    const cacheKey = `${effectiveQuery}::${selectedMode}`;
     if (!effectiveQuery) {
       setShortVideoResults([]);
       setShortVideoResultsQuery("");
       return;
     }
 
-    if (shortVideoResultsQuery === effectiveQuery && shortVideoResults.length > 0) {
+    if (shortVideoResultsQuery === cacheKey && shortVideoResults.length > 0) {
       return;
     }
 
@@ -1031,7 +1149,7 @@ function App() {
           "Content-Type": "application/json",
           "x-user-id": user?.id || "",
         },
-        body: JSON.stringify({ query: effectiveQuery }),
+        body: JSON.stringify({ query: effectiveQuery, safeMode: selectedMode }),
       });
 
       const data = await res.json();
@@ -1041,25 +1159,26 @@ function App() {
       }
 
       setShortVideoResults(data.videos || []);
-      setShortVideoResultsQuery(effectiveQuery);
+      setShortVideoResultsQuery(cacheKey);
     } catch (err) {
       console.error("Failed to fetch short videos:", err);
       setShortVideoResults([]);
-      setShortVideoResultsQuery(effectiveQuery);
+      setShortVideoResultsQuery(cacheKey);
     } finally {
       setShortVideosLoading(false);
     }
   };
 
-  const fetchNewsResults = async (rawQuery) => {
+  const fetchNewsResults = async (rawQuery, selectedMode = safeSearchByTab.news) => {
     const effectiveQuery = String(rawQuery || "").trim();
+    const cacheKey = `${effectiveQuery}::${selectedMode}`;
     if (!effectiveQuery) {
       setNewsResults([]);
       setNewsResultsQuery("");
       return;
     }
 
-    if (newsResultsQuery === effectiveQuery && newsResults.length > 0) {
+    if (newsResultsQuery === cacheKey && newsResults.length > 0) {
       return;
     }
 
@@ -1071,7 +1190,7 @@ function App() {
           "Content-Type": "application/json",
           "x-user-id": user?.id || "",
         },
-        body: JSON.stringify({ query: effectiveQuery }),
+        body: JSON.stringify({ query: effectiveQuery, safeMode: selectedMode }),
       });
 
       const data = await res.json();
@@ -1081,11 +1200,11 @@ function App() {
       }
 
       setNewsResults(data.news || []);
-      setNewsResultsQuery(effectiveQuery);
+      setNewsResultsQuery(cacheKey);
     } catch (err) {
       console.error("Failed to fetch news:", err);
       setNewsResults([]);
-      setNewsResultsQuery(effectiveQuery);
+      setNewsResultsQuery(cacheKey);
     } finally {
       setNewsLoading(false);
     }
@@ -1151,7 +1270,7 @@ function App() {
             "Content-Type": "application/json",
             "x-user-id": user?.id || "",
           },
-          body: JSON.stringify({ query }),
+          body: JSON.stringify({ query, safeMode: safeSearchByTab.images }),
         });
       } else {
         navigate(`/search/ai/new/${tempId}?query=${encodeURIComponent(query)}`);
@@ -1235,7 +1354,7 @@ function App() {
             "Content-Type": "application/json",
             "x-user-id": user?.id || "",
           },
-          body: JSON.stringify({ query }),
+          body: JSON.stringify({ query, safeMode: safeSearchByTab.images }),
         });
       }
 
@@ -3566,7 +3685,104 @@ function App() {
 
   const queryParam = new URLSearchParams(location.search).get("query");
   const activeSearchQuery = queryParam || prompt;
-  const tabImages = mode === "ai" ? imageResults : (Array.isArray(response?.images) ? response.images : []);
+  const tabImagesRaw = mode === "ai" ? imageResults : (Array.isArray(response?.images) ? response.images : []);
+  const isQuerySensitive = isSensitiveValue(activeSearchQuery || "");
+  const tabImages = tabImagesRaw.map((item) => normalizeImageItem(item, isQuerySensitive)).filter(Boolean);
+  const imageSafeMode = safeSearchByTab.images;
+  const visibleTabImages = imageSafeMode === "strict" ? tabImages.filter((item) => !item.isSensitive) : tabImages;
+  const hiddenSensitiveCount = imageSafeMode === "strict" ? Math.max(0, tabImages.length - visibleTabImages.length) : 0;
+
+  const videosWithSensitivity = videoResults.map((video) => ({
+    ...video,
+    isSensitive: isQuerySensitive || isSensitiveValue(`${video.title || ""} ${video.channel || ""} ${video.url || ""}`),
+  }));
+  const visibleVideos = safeSearchByTab.videos === "strict" ? videosWithSensitivity.filter((video) => !video.isSensitive) : videosWithSensitivity;
+  const hiddenVideosCount = safeSearchByTab.videos === "strict" ? Math.max(0, videosWithSensitivity.length - visibleVideos.length) : 0;
+
+  const shortVideosWithSensitivity = shortVideoResults.map((video) => ({
+    ...video,
+    isSensitive: isQuerySensitive || isSensitiveValue(`${video.title || ""} ${video.channel || ""} ${video.url || ""}`),
+  }));
+  const visibleShortVideos = safeSearchByTab.shortVideos === "strict" ? shortVideosWithSensitivity.filter((video) => !video.isSensitive) : shortVideosWithSensitivity;
+  const hiddenShortVideosCount = safeSearchByTab.shortVideos === "strict" ? Math.max(0, shortVideosWithSensitivity.length - visibleShortVideos.length) : 0;
+
+  const newsWithSensitivity = newsResults.map((item) => ({
+    ...item,
+    isSensitive: isQuerySensitive || isSensitiveValue(`${item.title || ""} ${item.snippet || ""} ${item.url || ""}`),
+  }));
+  const visibleNews = safeSearchByTab.news === "strict" ? newsWithSensitivity.filter((item) => !item.isSensitive) : newsWithSensitivity;
+  const hiddenNewsCount = safeSearchByTab.news === "strict" ? Math.max(0, newsWithSensitivity.length - visibleNews.length) : 0;
+
+  const handleSafeModeChange = async (tabKey, selectedMode) => {
+    const normalized = normalizeSafeMode(selectedMode);
+    setSafeSearchByTab((prev) => ({ ...prev, [tabKey]: normalized }));
+
+    if (!activeSearchQuery) return;
+
+    if (tabKey === "images") await fetchImageResults(activeSearchQuery, normalized);
+    if (tabKey === "videos") await fetchVideoResults(activeSearchQuery, normalized);
+    if (tabKey === "shortVideos") await fetchShortVideoResults(activeSearchQuery, normalized);
+    if (tabKey === "news") await fetchNewsResults(activeSearchQuery, normalized);
+  };
+
+  const renderSafeSearchToolbar = (tabKey) => (
+    <div className="safe-search-toolbar">
+      <span className="safe-search-label">Safe Search</span>
+      <div className="safe-search-options" role="tablist" aria-label="Safe Search mode">
+        {SAFE_SEARCH_OPTIONS.map((option) => (
+          <button
+            type="button"
+            key={option.key}
+            className={`safe-search-chip ${safeSearchByTab[tabKey] === option.key ? "active" : ""}`}
+            onClick={() => handleSafeModeChange(tabKey, option.key)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  const renderImageGrid = (images) => (
+    <div className="search-images-section">
+      <div className="search-images-grid">
+        {images.map((img, i) => {
+          const shouldBlur = safeSearchByTab.images === "blur" && img.isSensitive;
+          return (
+            <a
+              key={`${img.url}-${i}`}
+              href={img.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`search-image-card ${shouldBlur ? "sensitive-blur" : ""}`}
+            >
+              <img
+                src={img.renderUrl || img.url}
+                alt={`Search visual ${i + 1}`}
+                loading="lazy"
+                onError={(e) => {
+                  const renderUrl = img.renderUrl || "";
+                  if (renderUrl.includes("/api/instagram/resolve-image") && e.currentTarget.dataset.fallback !== "1") {
+                    e.currentTarget.dataset.fallback = "1";
+                    e.currentTarget.src = img.url;
+                    return;
+                  }
+
+                  if ((img.renderUrl || "") !== img.url && e.currentTarget.dataset.fallback !== "2") {
+                    e.currentTarget.dataset.fallback = "2";
+                    e.currentTarget.src = `/api/image-proxy?url=${encodeURIComponent(img.url)}`;
+                    return;
+                  }
+                  e.currentTarget.style.display = "none";
+                }}
+              />
+              {shouldBlur && <span className="safe-search-badge">Blurred</span>}
+            </a>
+          );
+        })}
+      </div>
+    </div>
+  );
 
   return (
     <div className="searchpage min-h-screen">
@@ -3740,28 +3956,15 @@ function App() {
               <div className="content">
                 <div className={`content-section ${activeTab === "answer" ? "block" : "hidden"}`}>
                   {tabImages.length > 0 && (
-                    <div className="search-images-section">
-                      <div className="search-images-grid">
-                        {tabImages.map((imgUrl, i) => (
-                          <a
-                            key={`${imgUrl}-${i}`}
-                            href={imgUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="search-image-card"
-                          >
-                            <img
-                              src={imgUrl}
-                              alt={`Search visual ${i + 1}`}
-                              loading="lazy"
-                              onError={(e) => {
-                                e.currentTarget.style.display = "none";
-                              }}
-                            />
-                          </a>
-                        ))}
-                      </div>
-                    </div>
+                    <>
+                      {renderSafeSearchToolbar("images")}
+                      {hiddenSensitiveCount > 0 && (
+                        <p className="safe-search-note">{hiddenSensitiveCount} sensitive image(s) hidden by Filter mode.</p>
+                      )}
+                      {visibleTabImages.length > 0 ? renderImageGrid(visibleTabImages) : (
+                        <p className="sources-empty">No image available after Safe Search filtering.</p>
+                      )}
+                    </>
                   )}
                   <div
                     className="ai-response-body"
@@ -3790,51 +3993,38 @@ function App() {
                   )}
                 </div>
                 <div className={`content-section ${activeTab === "images" ? "block" : "hidden"}`}>
+                  {renderSafeSearchToolbar("images")}
+                  {hiddenSensitiveCount > 0 && (
+                    <p className="safe-search-note">{hiddenSensitiveCount} sensitive image(s) hidden by Filter mode.</p>
+                  )}
                   {imagesLoading ? (
                     <div style={{ textAlign: "center", padding: "2rem" }}>
                       <p style={{ color: "var(--text-secondary)" }}>Loading images...</p>
                     </div>
-                  ) : tabImages.length > 0 ? (
-                    <div className="search-images-section">
-                      <div className="search-images-grid">
-                        {tabImages.map((imgUrl, i) => (
-                          <a
-                            key={`${imgUrl}-${i}`}
-                            href={imgUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="search-image-card"
-                          >
-                            <img
-                              src={imgUrl}
-                              alt={`Search visual ${i + 1}`}
-                              loading="lazy"
-                              onError={(e) => {
-                                e.currentTarget.style.display = "none";
-                              }}
-                            />
-                          </a>
-                        ))}
-                      </div>
-                    </div>
+                  ) : visibleTabImages.length > 0 ? (
+                    renderImageGrid(visibleTabImages)
                   ) : (
                     <p className="sources-empty">Click the Images tab to load visuals for this response.</p>
                   )}
                 </div>
                 <div className={`content-section ${activeTab === "videos" ? "block" : "hidden"}`}>
+                  {renderSafeSearchToolbar("videos")}
+                  {hiddenVideosCount > 0 && (
+                    <p className="safe-search-note">{hiddenVideosCount} sensitive video(s) hidden by Filter mode.</p>
+                  )}
                   {videosLoading ? (
                     <div style={{ textAlign: "center", padding: "2rem" }}>
                       <p style={{ color: "var(--text-secondary)" }}>Loading videos...</p>
                     </div>
-                  ) : videoResults.length > 0 ? (
+                  ) : visibleVideos.length > 0 ? (
                     <div className="google-videos-container">
-                      {videoResults.map((video, i) => (
+                      {visibleVideos.map((video, i) => (
                         <a
                           key={`${video.videoId}-${i}`}
                           href={video.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="google-video-result"
+                          className={`google-video-result ${safeSearchByTab.videos === "blur" && video.isSensitive ? "safe-blur-card" : ""}`}
                         >
                           <div className="google-video-thumbnail">
                             <img
@@ -3861,19 +4051,23 @@ function App() {
                   )}
                 </div>
                 <div className={`content-section ${activeTab === "short-videos" ? "block" : "hidden"}`}>
+                  {renderSafeSearchToolbar("shortVideos")}
+                  {hiddenShortVideosCount > 0 && (
+                    <p className="safe-search-note">{hiddenShortVideosCount} sensitive short video(s) hidden by Filter mode.</p>
+                  )}
                   {shortVideosLoading ? (
                     <div style={{ textAlign: "center", padding: "2rem" }}>
                       <p style={{ color: "var(--text-secondary)" }}>Loading short videos...</p>
                     </div>
-                  ) : shortVideoResults.length > 0 ? (
+                  ) : visibleShortVideos.length > 0 ? (
                     <div className="google-videos-container">
-                      {shortVideoResults.map((video, i) => (
+                      {visibleShortVideos.map((video, i) => (
                         <a
                           key={`${video.videoId || video.url}-${i}`}
                           href={video.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="google-video-result"
+                          className={`google-video-result ${safeSearchByTab.shortVideos === "blur" && video.isSensitive ? "safe-blur-card" : ""}`}
                         >
                           <div className="google-video-thumbnail short-video-thumbnail">
                             <img
@@ -3900,19 +4094,23 @@ function App() {
                   )}
                 </div>
                 <div className={`content-section ${activeTab === "news" ? "block" : "hidden"}`}>
+                  {renderSafeSearchToolbar("news")}
+                  {hiddenNewsCount > 0 && (
+                    <p className="safe-search-note">{hiddenNewsCount} sensitive news item(s) hidden by Filter mode.</p>
+                  )}
                   {newsLoading ? (
                     <div style={{ textAlign: "center", padding: "2rem" }}>
                       <p style={{ color: "var(--text-secondary)" }}>Loading news...</p>
                     </div>
-                  ) : newsResults.length > 0 ? (
+                  ) : visibleNews.length > 0 ? (
                     <div className="news-results-container">
-                      {newsResults.map((item, i) => (
+                      {visibleNews.map((item, i) => (
                         <a
                           key={`${item.url}-${i}`}
                           href={item.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="news-result-card"
+                          className={`news-result-card ${safeSearchByTab.news === "blur" && item.isSensitive ? "safe-blur-card" : ""}`}
                         >
                           <p className="news-source">{item.source || "News Source"}</p>
                           <h3 className="news-title">{item.title}</h3>

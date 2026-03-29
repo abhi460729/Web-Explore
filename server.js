@@ -138,7 +138,244 @@ function getHeader(headers = [], key = "") {
   return headers.find((h) => h.name?.toLowerCase() === key.toLowerCase())?.value || "";
 }
 
-// Simple in-memory per-user throttle (5 sec cooldown)
+const SAFE_SEARCH_MODES = new Set(["strict", "blur", "off"]);
+const SAFE_SEARCH_BLOCKED_DOMAINS = [
+  "pornhub.com",
+  "xvideos.com",
+  "xnxx.com",
+  "xhamster.com",
+  "redtube.com",
+  "spankbang.com",
+  "youporn.com",
+  "tube8.com",
+  "onlyfans.com",
+  "rule34",
+  "hentai"
+];
+const SAFE_SEARCH_TERMS = /\b(?:porn|xxx|sex|nude|naked|escort|erotic|adult|nsfw|fetish|camgirl|onlyfans|hentai|hardcore|milf|bdsm|anal)\b/i;
+
+function normalizeSafeSearchMode(mode) {
+  const normalized = String(mode || "").toLowerCase();
+  return SAFE_SEARCH_MODES.has(normalized) ? normalized : "strict";
+}
+
+function isSensitiveText(value = "") {
+  const text = String(value || "").toLowerCase();
+  if (!text) return false;
+  if (SAFE_SEARCH_TERMS.test(text)) return true;
+  return SAFE_SEARCH_BLOCKED_DOMAINS.some((domain) => text.includes(domain));
+}
+
+function isSensitiveUrl(rawUrl = "") {
+  const value = String(rawUrl || "").trim().toLowerCase();
+  if (!value) return false;
+  if (isSensitiveText(value)) return true;
+
+  try {
+    const parsed = new URL(value);
+    const hostAndPath = `${parsed.hostname}${parsed.pathname}`.toLowerCase();
+    return SAFE_SEARCH_BLOCKED_DOMAINS.some((domain) => hostAndPath.includes(domain));
+  } catch {
+    return false;
+  }
+}
+
+function applySafeSearchToImages(rawImages = [], safeMode = "strict", query = "") {
+  const querySensitive = isSensitiveText(query);
+  const normalizedImages = rawImages
+    .map((img) => {
+      if (typeof img === "string") {
+        const url = img.trim();
+        if (!url) return null;
+        return {
+          url,
+          isSensitive: querySensitive || isSensitiveUrl(url),
+        };
+      }
+
+      if (img && typeof img === "object") {
+        const url = String(img.url || img.image_url || img.src || "").trim();
+        if (!url) return null;
+        const descriptor = `${url} ${img.title || ""} ${img.caption || ""} ${img.reason || ""}`;
+        return {
+          url,
+          isSensitive: querySensitive || Boolean(img.isSensitive || img.sensitive) || isSensitiveText(descriptor),
+        };
+      }
+
+      return null;
+    })
+    .filter(Boolean);
+
+  if (safeMode === "strict") {
+    return normalizedImages.filter((img) => !img.isSensitive);
+  }
+  return normalizedImages;
+}
+
+function isSensitiveMediaItem(item = {}, query = "") {
+  return isSensitiveText(query)
+    || isSensitiveText(`${item.title || ""} ${item.snippet || ""} ${item.channel || ""}`)
+    || isSensitiveUrl(item.url || "")
+    || isSensitiveUrl(item.thumbnail || "")
+    || isSensitiveUrl(item.thumbnailUrl || "");
+}
+
+function applySafeSearchToCollection(items = [], safeMode = "strict", query = "") {
+  if (safeMode !== "strict") return items;
+  return items.filter((item) => !isSensitiveMediaItem(item, query));
+}
+
+const IMAGE_PROXY_ALLOWED_HOST_MARKERS = [
+  "instagram.com",
+  "cdninstagram.com",
+  "fbcdn.net",
+  "fna.fbcdn.net",
+  "scontent",
+];
+
+function isAllowedImageProxyHost(hostname = "") {
+  const host = String(hostname || "").toLowerCase();
+  if (!host) return false;
+  return IMAGE_PROXY_ALLOWED_HOST_MARKERS.some((marker) => host.includes(marker));
+}
+
+function extractInstagramImageFromHtml(html = "") {
+  if (!html) return "";
+
+  const ogImageMatch = html.match(/<meta\s+property=["']og:image["']\s+content=["']([^"']+)["']/i)
+    || html.match(/<meta\s+content=["']([^"']+)["']\s+property=["']og:image["']/i);
+  if (ogImageMatch?.[1]) return ogImageMatch[1].replace(/&amp;/g, "&");
+
+  const displayUrlMatch = html.match(/"display_url":"(https?:\\\/\\\/[^\"]+)"/i);
+  if (displayUrlMatch?.[1]) {
+    return displayUrlMatch[1].replace(/\\\//g, "/");
+  }
+
+  return "";
+}
+
+app.get("/api/instagram/resolve-image", async (req, res) => {
+  try {
+    const rawUrl = String(req.query.url || "").trim();
+    if (!rawUrl) {
+      return res.status(400).json({ error: "url query param is required" });
+    }
+
+    let parsed;
+    try {
+      parsed = new URL(rawUrl);
+    } catch {
+      return res.status(400).json({ error: "Invalid Instagram URL" });
+    }
+
+    const host = parsed.hostname.toLowerCase();
+    if (!host.includes("instagram.com")) {
+      return res.status(403).json({ error: "Only Instagram post URLs are allowed" });
+    }
+
+    if (!/^\/(p|reel|tv)\//i.test(parsed.pathname)) {
+      return res.status(400).json({ error: "Unsupported Instagram URL format" });
+    }
+
+    const upstream = await fetch(parsed.toString(), {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+      redirect: "follow",
+    });
+
+    if (!upstream.ok) {
+      return res.status(502).json({ error: `Failed to open Instagram URL (${upstream.status})` });
+    }
+
+    const html = await upstream.text();
+    const resolvedImageUrl = extractInstagramImageFromHtml(html);
+    if (!resolvedImageUrl) {
+      return res.status(404).json({ error: "Image not resolved from Instagram post" });
+    }
+
+    const imageUpstream = await fetch(resolvedImageUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        "Referer": "https://www.instagram.com/",
+      },
+      redirect: "follow",
+    });
+
+    if (!imageUpstream.ok) {
+      return res.status(502).json({ error: `Failed to fetch resolved image (${imageUpstream.status})` });
+    }
+
+    const contentType = imageUpstream.headers.get("content-type") || "image/jpeg";
+    if (!contentType.toLowerCase().startsWith("image/")) {
+      return res.status(415).json({ error: "Resolved Instagram asset is not an image" });
+    }
+
+    const imageBuffer = await imageUpstream.arrayBuffer();
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "public, max-age=1800");
+    res.send(Buffer.from(imageBuffer));
+  } catch (err) {
+    console.error("Instagram resolve image error:", err.message);
+    res.status(500).json({ error: "Instagram resolve image failed" });
+  }
+});
+
+app.get("/api/image-proxy", async (req, res) => {
+  try {
+    const rawUrl = String(req.query.url || "").trim();
+    if (!rawUrl) {
+      return res.status(400).json({ error: "url query param is required" });
+    }
+
+    let parsed;
+    try {
+      parsed = new URL(rawUrl);
+    } catch {
+      return res.status(400).json({ error: "Invalid image URL" });
+    }
+
+    if (!["http:", "https:"].includes(parsed.protocol)) {
+      return res.status(400).json({ error: "Only http/https image URLs are allowed" });
+    }
+
+    if (!isAllowedImageProxyHost(parsed.hostname)) {
+      return res.status(403).json({ error: "Host not allowed for image proxy" });
+    }
+
+    const upstream = await fetch(parsed.toString(), {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        "Referer": "https://www.instagram.com/",
+      },
+      redirect: "follow",
+    });
+
+    if (!upstream.ok) {
+      return res.status(502).json({ error: `Failed to fetch image (${upstream.status})` });
+    }
+
+    const contentType = upstream.headers.get("content-type") || "image/jpeg";
+    if (!contentType.toLowerCase().startsWith("image/")) {
+      return res.status(415).json({ error: "Upstream URL did not return image content" });
+    }
+
+    const imageBuffer = await upstream.arrayBuffer();
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "public, max-age=1800");
+    res.send(Buffer.from(imageBuffer));
+  } catch (err) {
+    console.error("Image proxy error:", err.message);
+    res.status(500).json({ error: "Image proxy failed" });
+  }
+});
+
+// Simple in-memory per-user+route throttle
 const userLastRequest = new Map();
 
 // ── Usage & Plan limit middleware ─────────────────────────────────────────
@@ -147,23 +384,45 @@ async function checkUsageAndPlan(req, res, next) {
   if (!userId) return res.status(401).json({ error: "Please login first" });
 
   const now = Date.now();
-  const last = userLastRequest.get(userId) || 0;
-  if (now - last < 5000) {
+  const routeKey = `${userId}:${req.path}`;
+  const defaultCooldownMs = 1200;
+  const routeCooldownMs = {
+    "/api/search/images": 400,
+    "/api/search/videos": 400,
+    "/api/search/short-videos": 400,
+    "/api/search/news": 400,
+    "/api/history": 0,
+  };
+  const cooldownMs = routeCooldownMs[req.path] ?? defaultCooldownMs;
+  const last = userLastRequest.get(routeKey) || 0;
+
+  if (cooldownMs > 0 && now - last < cooldownMs) {
+    const retryAfterMs = cooldownMs - (now - last);
+    const retryAfterSec = Math.max(1, Math.ceil(retryAfterMs / 1000));
     return res.status(429).json({ 
       error: "Too many requests. Please wait a few seconds.",
-      retryAfter: "5s"
+      retryAfter: `${retryAfterSec}s`
     });
   }
-  userLastRequest.set(userId, now);
+  userLastRequest.set(routeKey, now);
 
   try {
-    const user = await prisma.user.findUnique({
+    let user = await prisma.user.findUnique({
       where: { id: userId },
       include: { currentPlan: true },
     });
 
     if (!user) return res.status(401).json({ error: "User not found" });
-    if (!user.currentPlan) return res.status(403).json({ error: "No active plan found" });
+
+    if (!user.currentPlan) {
+      const freePlan = await prisma.plan.findFirst({ where: { name: "FREE" } });
+      if (!freePlan) return res.status(403).json({ error: "No active plan found" });
+      user = await prisma.user.update({
+        where: { id: userId },
+        data: { currentPlanId: freePlan.id },
+        include: { currentPlan: true },
+      });
+    }
 
     const plan = user.currentPlan;
     const nowDate = new Date();
@@ -181,7 +440,7 @@ async function checkUsageAndPlan(req, res, next) {
     }
 
     const freePlan = await prisma.plan.findFirst({ where: { name: "FREE" } });
-    if (!freePlan) throw new Error("FREE plan not found");
+    if (!freePlan) throw new Error("FREE plan not configured");
     const FREE_LIMIT = freePlan.usageLimit;
 
     const lifetimeUsage = await prisma.usageLog.aggregate({
@@ -370,6 +629,23 @@ app.post("/api/auth/google", async (req, res) => {
       });
 
       console.log(`New user created with FREE plan: ${user.email}`);
+    } else if (!user.currentPlan) {
+      const freePlan = await prisma.plan.findUnique({ where: { name: "FREE" } });
+      if (!freePlan) {
+        console.error("FREE plan not found in database for existing user repair!");
+        return res.status(500).json({ error: "Server configuration error: FREE plan missing" });
+      }
+
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          currentPlan: { connect: { id: freePlan.id } },
+          subscriptionStart: user.subscriptionStart || new Date(),
+        },
+        include: { currentPlan: true },
+      });
+
+      console.log(`Existing user repaired with FREE plan: ${user.email}`);
     }
 
     res.json({ user });
@@ -558,6 +834,7 @@ app.post("/api/generate", checkUsageAndPlan, async (req, res) => {
 app.post("/api/search", checkUsageAndPlan, async (req, res) => {
   try {
     const { query } = req.body;
+    const safeMode = normalizeSafeSearchMode(req.body?.safeMode);
     if (!query) return res.status(400).json({ error: "Query required" });
 
     let searchModel = "gpt-4o-mini";
@@ -572,6 +849,7 @@ app.post("/api/search", checkUsageAndPlan, async (req, res) => {
         query,
         search_depth: "basic",
         include_images: true,
+        exclude_domains: safeMode === "off" ? [] : SAFE_SEARCH_BLOCKED_DOMAINS,
         max_results: req.userPlan.name === "ULTRA" ? 8 : 5,
       }),
     });
@@ -592,7 +870,14 @@ app.post("/api/search", checkUsageAndPlan, async (req, res) => {
     const fallbackImages = Array.from({ length: 6 }, (_, i) => (
       `https://source.unsplash.com/960x540/?${encodeURIComponent(query)}&sig=${i + 1}`
     ));
-    const images = (tavilyImages.length ? tavilyImages : fallbackImages).slice(0, 6);
+    let images = applySafeSearchToImages(
+      tavilyImages.length ? tavilyImages : fallbackImages,
+      safeMode,
+      query
+    ).slice(0, 6);
+    if (images.length === 0) {
+      images = applySafeSearchToImages(fallbackImages, safeMode, query).slice(0, 6);
+    }
     const videoHostPattern = /(youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com|loom\.com)/i;
     const extractYouTubeId = (rawUrl = "") => {
       const trimmed = String(rawUrl || "").trim();
@@ -642,7 +927,7 @@ app.post("/api/search", checkUsageAndPlan, async (req, res) => {
           thumbnailUrl: ""
         }))
       : [];
-    const finalVideos = [...videos, ...fallbackVideos].slice(0, 8);
+    const finalVideos = applySafeSearchToCollection([...videos, ...fallbackVideos], safeMode, query).slice(0, 8);
 
     const sources = results.map((r, i) => `[${i+1}] ${r.title} (${r.url})`).join("\n");
     const context = results.map((r, i) => `[${i+1}] ${r.content}`).join("\n\n");
@@ -708,7 +993,8 @@ app.post("/api/search", checkUsageAndPlan, async (req, res) => {
       suggestions,
       querySlug,
       finalId,
-      modelUsed: searchModel
+      modelUsed: searchModel,
+      safeMode
     });
   } catch (err) {
     console.error("Search error:", err.message);
@@ -719,6 +1005,7 @@ app.post("/api/search", checkUsageAndPlan, async (req, res) => {
 app.post("/api/search/videos", checkUsageAndPlan, async (req, res) => {
   try {
     const { query } = req.body;
+    const safeMode = normalizeSafeSearchMode(req.body?.safeMode);
     if (!query) return res.status(400).json({ error: "Query required" });
 
     const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
@@ -781,10 +1068,13 @@ app.post("/api/search/videos", checkUsageAndPlan, async (req, res) => {
       }));
     }
 
+    const safeVideos = applySafeSearchToCollection(videosData, safeMode, query);
+
     res.json({
-      videos: videosData,
+      videos: safeVideos,
       query,
-      count: videosData.length
+      count: safeVideos.length,
+      safeMode
     });
   } catch (err) {
     console.error("Video search error:", err.message);
@@ -799,6 +1089,7 @@ app.post("/api/search/videos", checkUsageAndPlan, async (req, res) => {
 app.post("/api/search/images", checkUsageAndPlan, async (req, res) => {
   try {
     const { query } = req.body;
+    const safeMode = normalizeSafeSearchMode(req.body?.safeMode);
     if (!query) return res.status(400).json({ error: "Query required" });
 
     const tavilyRes = await fetch("https://api.tavily.com/search", {
@@ -809,6 +1100,7 @@ app.post("/api/search/images", checkUsageAndPlan, async (req, res) => {
         query,
         search_depth: "basic",
         include_images: true,
+        exclude_domains: safeMode === "off" ? [] : SAFE_SEARCH_BLOCKED_DOMAINS,
         max_results: req.userPlan?.name === "ULTRA" ? 8 : 5,
       }),
     });
@@ -816,39 +1108,35 @@ app.post("/api/search/images", checkUsageAndPlan, async (req, res) => {
     let images = [];
     if (tavilyRes.ok) {
       const tavilyData = await tavilyRes.json();
-      images = (Array.isArray(tavilyData?.images) ? tavilyData.images : [])
-        .map((img) => {
-          if (typeof img === "string") return img;
-          if (img && typeof img === "object") {
-            return img.url || img.image_url || img.src || "";
-          }
-          return "";
-        })
-        .filter(Boolean)
-        .slice(0, 12);
+      images = applySafeSearchToImages(Array.isArray(tavilyData?.images) ? tavilyData.images : [], safeMode, query).slice(0, 12);
     }
 
     if (images.length === 0) {
-      images = Array.from({ length: 8 }, (_, i) => (
+      const fallbackImages = Array.from({ length: 8 }, (_, i) => (
         `https://source.unsplash.com/960x540/?${encodeURIComponent(query)}&sig=${i + 1}`
       ));
+      images = applySafeSearchToImages(fallbackImages, safeMode, query).slice(0, 8);
     }
 
     res.json({
       images,
       query,
       count: images.length,
+      safeMode,
     });
   } catch (err) {
     console.error("Image search error:", err.message);
+    const safeMode = normalizeSafeSearchMode(req.body?.safeMode);
     const fallbackImages = Array.from({ length: 8 }, (_, i) => (
       `https://source.unsplash.com/960x540/?${encodeURIComponent(req.body.query || "search")}&sig=${i + 1}`
     ));
+    const safeFallbackImages = applySafeSearchToImages(fallbackImages, safeMode, req.body.query || "").slice(0, 8);
 
     res.status(200).json({
-      images: fallbackImages,
+      images: safeFallbackImages,
       query: req.body.query || "",
-      count: fallbackImages.length,
+      count: safeFallbackImages.length,
+      safeMode,
     });
   }
 });
@@ -856,6 +1144,7 @@ app.post("/api/search/images", checkUsageAndPlan, async (req, res) => {
 app.post("/api/search/short-videos", checkUsageAndPlan, async (req, res) => {
   try {
     const { query } = req.body;
+    const safeMode = normalizeSafeSearchMode(req.body?.safeMode);
     if (!query) return res.status(400).json({ error: "Query required" });
 
     const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(`${query} shorts`)}`;
@@ -914,10 +1203,13 @@ app.post("/api/search/short-videos", checkUsageAndPlan, async (req, res) => {
       }));
     }
 
+    const safeVideos = applySafeSearchToCollection(videosData, safeMode, query);
+
     res.json({
-      videos: videosData,
+      videos: safeVideos,
       query,
-      count: videosData.length
+      count: safeVideos.length,
+      safeMode
     });
   } catch (err) {
     console.error("Short video search error:", err.message);
@@ -932,6 +1224,7 @@ app.post("/api/search/short-videos", checkUsageAndPlan, async (req, res) => {
 app.post("/api/search/news", checkUsageAndPlan, async (req, res) => {
   try {
     const { query } = req.body;
+    const safeMode = normalizeSafeSearchMode(req.body?.safeMode);
     if (!query) return res.status(400).json({ error: "Query required" });
 
     const tavilyRes = await fetch("https://api.tavily.com/search", {
@@ -974,6 +1267,8 @@ app.post("/api/search/news", checkUsageAndPlan, async (req, res) => {
       .filter(Boolean)
       .slice(0, 10);
 
+    news = applySafeSearchToCollection(news, safeMode, query).slice(0, 10);
+
     if (news.length === 0) {
       news = Array.from({ length: 6 }, (_, i) => ({
         title: `${query} - News Update ${i + 1}`,
@@ -981,12 +1276,14 @@ app.post("/api/search/news", checkUsageAndPlan, async (req, res) => {
         snippet: "Click to read latest news related to your query.",
         source: "news.google.com"
       }));
+      news = applySafeSearchToCollection(news, safeMode, query);
     }
 
     res.json({
       news,
       query,
-      count: news.length
+      count: news.length,
+      safeMode
     });
   } catch (err) {
     console.error("News search error:", err.message);
