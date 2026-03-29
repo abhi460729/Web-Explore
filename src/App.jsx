@@ -327,6 +327,7 @@ function App() {
   const [isLoginOverlayDismissed, setIsLoginOverlayDismissed] = useState(false);
   const [googleLoginLoading, setGoogleLoginLoading] = useState(false);
   const [googleLoginError, setGoogleLoginError] = useState("");
+  const [isGoogleButtonReady, setIsGoogleButtonReady] = useState(false);
 
   const showToast = (message, type = "info") => {
     setToast({ message, type });
@@ -955,6 +956,7 @@ function App() {
     if (!shouldShowSharedLoginGate) {
       setIsLoginOverlayDismissed(false);
       setGoogleLoginError("");
+      setIsGoogleButtonReady(false);
     }
   }, [shouldShowSharedLoginGate]);
 
@@ -1063,6 +1065,7 @@ function App() {
         const clientId = await resolveGoogleClientId();
         if (!clientId) {
           setGoogleLoginError("Google login is not configured. Please contact support.");
+          setIsGoogleButtonReady(false);
           setGoogleLoginLoading(false);
           return;
         }
@@ -1095,6 +1098,9 @@ function App() {
             size: "large",
             width: Math.min(360, Math.max(260, googleButtonContainerRef.current.offsetWidth || 320)),
           });
+          setIsGoogleButtonReady(true);
+        } else {
+          setIsGoogleButtonReady(false);
         }
 
         // One Tap is optional: if blocked in incognito, button still works.
@@ -1103,6 +1109,7 @@ function App() {
       } catch (err) {
         if (!cancelled) {
           setGoogleLoginError(err?.message || "Unable to load Google sign-in");
+          setIsGoogleButtonReady(false);
           setGoogleLoginLoading(false);
         }
       }
@@ -4880,15 +4887,6 @@ function App() {
               </p>
 
               <div className="shared-google-slot" ref={googleButtonContainerRef} />
-
-              <button
-                type="button"
-                className="shared-google-btn"
-                onClick={handleContinueWithGoogle}
-                disabled={googleLoginLoading}
-              >
-                {googleLoginLoading ? "Preparing Google Sign-In..." : "Try Google One Tap"}
-              </button>
 
               {googleLoginError && <p className="shared-login-error">{googleLoginError}</p>}
             </div>
