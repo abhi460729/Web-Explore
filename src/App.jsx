@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import debounce from "lodash/debounce";
 import DOMPurify from "dompurify";
@@ -237,6 +237,7 @@ const downloadExperienceLetterPdf = async (payload) => {
 function App() {
   const location = useLocation();
   const navigate = useNavigate();
+  const lastUrlHydrateKeyRef = useRef("");
 
   
   const getDoodle = () => {
@@ -898,13 +899,13 @@ function App() {
     const isPermalinkRoute = !!matchedPermalink && !location.pathname.includes("/new/");
     const routeSearchId = matchedPermalink?.[1] || "";
     const isAiPermalink = location.pathname.startsWith("/search/ai/");
-    const hasHydratedResponse =
-      !!response &&
-      prompt.trim().toLowerCase() === String(query || "").trim().toLowerCase();
+    const hydrateKey = `${location.pathname}${location.search}`;
 
-    if (isPermalinkRoute && query && !hasHydratedResponse) {
+    if (isPermalinkRoute && query && lastUrlHydrateKeyRef.current !== hydrateKey) {
+      lastUrlHydrateKeyRef.current = hydrateKey;
       handleUrlSearch(query, routeSearchId, isAiPermalink);
     } else if (prefillFromState && location.pathname === "/search") {
+      lastUrlHydrateKeyRef.current = "";
       setPrompt(prefillFromState);
       setResponse(null);
       setMode("search");
@@ -914,6 +915,7 @@ function App() {
         handleSubmit(null, prefillFromState, autoRunMode);
       }
     } else if (location.pathname === "/search") {
+      lastUrlHydrateKeyRef.current = "";
       setResponse(null);
       setPrompt("");
       setMode("search");
@@ -924,8 +926,6 @@ function App() {
     location.pathname,
     location.state?.prefillPrompt,
     location.state?.autoRunMode,
-    response,
-    prompt,
   ]);
 
   useEffect(() => {
