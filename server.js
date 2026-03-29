@@ -36,7 +36,7 @@ import XLSX from "xlsx";
 // ── Scalability infrastructure ────────────────────────────────────────────
 import { cacheGet, cacheSet, cacheDel, CacheKey, TTL, withCache, cacheHealthCheck } from "./services/cache.js";
 import { globalLimiter, searchLimiter, authLimiter, paymentLimiter, workflowLimiter } from "./middlewares/rateLimiter.js";
-import { getQueueStats, closeQueues } from "./services/queue.js";
+import { getQueueStats, closeQueues, enqueueGenerateJob } from "./services/queue.js";
 
 // Prisma – with connection pool tuning for high concurrency
 import prismaPkg from '@prisma/client';
@@ -108,6 +108,9 @@ app.use(compression({ level: 6, threshold: 1024 }));
 
 // ── Global rate limiter (200 req/min per IP across all routes) ────────────
 app.use(globalLimiter);
+
+// ── Workflow limiter for all workflow endpoints ────────────────────────────
+app.use("/api/workflows", workflowLimiter);
 
 // ── Request size limits (prevent payload-based DoS) ──────────────────────
 app.use(express.json({ limit: '2mb' }));
@@ -602,7 +605,7 @@ app.post("/api/create-razorpay-order", paymentLimiter, async (req, res) => {
 });
 
 // ── Razorpay Payment Verification Endpoint ────────────────────────────────
-app.post("/api/verify-razorpay-payment", async (req, res) => {
+app.post("/api/verify-razorpay-payment", paymentLimiter, async (req, res) => {
   const { razorpay_order_id, razorpay_payment_id, razorpay_signature, planName } = req.body;
   const userId = req.headers["x-user-id"];
 
@@ -851,40 +854,30 @@ app.get("/api/google/callback", async (req, res) => {
   }
 });
 
-// ── Generate (AI Direct) ──────────────────────────────────────────────────
-app.post("/api/generate", checkUsageAndPlan, async (req, res) => {
+// ── Generate (Queue-backed for better burst handling) ─────────────────────
+app.post("/api/generate", searchLimiter, checkUsageAndPlan, async (req, res) => {
   const { prompt, model: requestedModel } = req.body;
   const model = sanitizeModel(requestedModel);
 
   if (!prompt) return res.status(400).json({ error: "Prompt required" });
 
   try {
-    const { text } = await generateText({
-      model: openai(model),
+    const result = await enqueueGenerateJob({
       prompt,
+      model,
+      userId: req.user.id,
     });
-
-    let suggestions = [];
-    try {
-      const sugRes = await generateText({
-        model: openai(model),
-        prompt: `Generate 3 intelligent follow-up questions.\n\nAnswer: ${text}\n\nOnly list the 3 questions, one per line.`,
-      });
-      suggestions = sugRes.text
-        .split(/\n+/)
-        .map(q => q.trim())
-        .filter(q => q && !q.match(/^\d+\./))
-        .slice(0, 3);
-    } catch {}
-
-    const tokens = Math.ceil((prompt.length + text.length) / 4) + 300;
+    const text = result?.text || "";
+    const suggestions = Array.isArray(result?.suggestions) ? result.suggestions : [];
+    const tokens = Number(result?.tokens) || Math.ceil((prompt.length + text.length) / 4) + 300;
+    const modelUsed = result?.modelUsed || model;
 
     await prisma.usageLog.create({
       data: {
         userId: req.user.id,
         queryType: "generate",
         tokensUsed: tokens,
-        modelUsed: model,
+        modelUsed,
         success: true,
         inputText: prompt,
       },
@@ -898,7 +891,7 @@ app.post("/api/generate", checkUsageAndPlan, async (req, res) => {
       },
     });
 
-    res.json({ text, suggestions, modelUsed: model });
+    res.json({ text, suggestions, modelUsed });
   } catch (err) {
     console.error("Generate error:", err);
     res.status(500).json({ error: "Generation failed" });
@@ -1658,7 +1651,7 @@ app.get("/api/calendar/meetings", async (req, res) => {
 });
 
 // ── Automate Workflows Endpoint (NO usage check) ──────────────────────────
-app.post("/api/automate-workflows", async (req, res) => {
+app.post("/api/automate-workflows", workflowLimiter, async (req, res) => {
   const userId = req.headers["x-user-id"];
 
   if (!userId) {

@@ -32,6 +32,7 @@ module.exports = {
       env_production: {
         NODE_ENV: "production",
         PORT: 8080,
+        QUEUE_WORKERS_IN_PROCESS: "false",
       },
 
       // ── Memory & Restart Policy ───────────────────────────────────────────
@@ -63,24 +64,29 @@ module.exports = {
       ],
     },
 
-    // ── BullMQ Queue Workers (separate processes) ─────────────────────────
-    // Scale workers independently from the HTTP server.
-    // Uncomment and configure once you move heavy jobs to the queue.
-    // {
-    //   name: "search-worker",
-    //   script: "workers/searchWorker.js",
-    //   instances: 2,
-    //   exec_mode: "fork",
-    //   env_production: { NODE_ENV: "production" },
-    //   max_memory_restart: "512M",
-    // },
-    // {
-    //   name: "workflow-worker",
-    //   script: "workers/workflowWorker.js",
-    //   instances: 1,
-    //   exec_mode: "fork",
-    //   env_production: { NODE_ENV: "production" },
-    //   max_memory_restart: "768M",
-    // },
+    // ── BullMQ Queue Worker (separate process) ────────────────────────────
+    // Runs queue consumers outside HTTP workers for better isolation.
+    {
+      name: "queue-worker",
+      script: "workers/queueWorker.js",
+      instances: 1,
+      exec_mode: "fork",
+      env: {
+        NODE_ENV: "development",
+        QUEUE_WORKERS_IN_PROCESS: "true",
+      },
+      env_production: {
+        NODE_ENV: "production",
+        QUEUE_WORKERS_IN_PROCESS: "true",
+      },
+      max_memory_restart: "768M",
+      restart_delay: 1000,
+      min_uptime: "5s",
+      out_file: "./logs/queue-worker-out.log",
+      error_file: "./logs/queue-worker-error.log",
+      merge_logs: true,
+      watch: false,
+      ignore_watch: ["node_modules", "dist", "logs", ".git"],
+    },
   ],
 };
