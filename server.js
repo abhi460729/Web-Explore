@@ -664,6 +664,17 @@ app.get("/api/auth/google-config", (req, res) => {
   });
 });
 
+app.get("/api/auth/debug", (req, res) => {
+  res.json({
+    googleClientIdSet: Boolean(process.env.GOOGLE_CLIENT_ID),
+    viteGoogleClientIdSet: Boolean(process.env.VITE_GOOGLE_CLIENT_ID),
+    primaryClientId: PRIMARY_GOOGLE_CLIENT_ID ? `${PRIMARY_GOOGLE_CLIENT_ID.slice(0, 20)}...` : "NOT_SET",
+    allowedAudiences: ALLOWED_GOOGLE_AUDIENCES ? ALLOWED_GOOGLE_AUDIENCES.length : 0,
+    nodeEnv: process.env.NODE_ENV,
+    timestamp: new Date().toISOString(),
+  });
+});
+
 app.post("/api/auth/google", authLimiter, async (req, res) => {
   const { token } = req.body;
 

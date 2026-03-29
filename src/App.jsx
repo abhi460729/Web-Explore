@@ -1002,17 +1002,33 @@ function App() {
 
   const resolveGoogleClientId = async () => {
     const viteClientId = String(import.meta.env.VITE_GOOGLE_CLIENT_ID || "").trim();
-    if (viteClientId) return viteClientId;
+    
+    if (viteClientId) {
+      console.log("✓ Google Client ID resolved from VITE_GOOGLE_CLIENT_ID env (first 20 chars):", viteClientId.slice(0, 20) + "...");
+      return viteClientId;
+    }
 
     try {
       const configRes = await fetch("/api/auth/google-config");
+      if (!configRes.ok) {
+        console.warn("⚠ /api/auth/google-config returned status:", configRes.status);
+        return "";
+      }
+      
       const configData = await configRes.json();
       const runtimeClientId = String(configData?.clientId || "").trim();
-      if (runtimeClientId) return runtimeClientId;
-    } catch {
-      // Ignore and fall through to a user-facing error.
+      
+      if (runtimeClientId) {
+        console.log("✓ Google Client ID resolved from /api/auth/google-config (first 20 chars):", runtimeClientId.slice(0, 20) + "...");
+        return runtimeClientId;
+      }
+
+      console.warn("⚠ Server returned empty clientId from /api/auth/google-config. Check GOOGLE_CLIENT_ID env var on server.");
+    } catch (err) {
+      console.error("✗ Error fetching Google config from server:", err.message);
     }
 
+    console.error("✗ Google Client ID not configured. Set GOOGLE_CLIENT_ID on server or VITE_GOOGLE_CLIENT_ID in .env.local");
     return "";
   };
 
@@ -1020,7 +1036,10 @@ function App() {
     const clientId = await resolveGoogleClientId();
 
     if (!clientId) {
-      setGoogleLoginError("Google login is not configured. Please contact support.");
+      const debugMsg = "Google login is not configured on this instance. Check browser console for details. Admins: verify GOOGLE_CLIENT_ID env var is set.";
+      setGoogleLoginError(debugMsg);
+      console.error("✗", debugMsg);
+      console.info("📋 Check server config at: /api/auth/debug");
       return;
     }
 
@@ -1064,9 +1083,12 @@ function App() {
       try {
         const clientId = await resolveGoogleClientId();
         if (!clientId) {
-          setGoogleLoginError("Google login is not configured. Please contact support.");
+          const debugMsg = "Google login is not configured. Check browser console for details. Admins: verify GOOGLE_CLIENT_ID env var is set.";
+          setGoogleLoginError(debugMsg);
           setIsGoogleButtonReady(false);
           setGoogleLoginLoading(false);
+          console.error("✗", debugMsg);
+          console.info("📋 Check server config at: /api/auth/debug");
           return;
         }
 
@@ -1694,10 +1716,14 @@ function App() {
       setResponse(data);
 
       if (activeMode === "search") {
-        navigate(`/search/${data.querySlug || querySlug}-${data.finalId}?query=${encodeURIComponent(query)}`);
+        const finalSearchUrl = `/search/${data.querySlug || querySlug}-${data.finalId}?query=${encodeURIComponent(query)}`;
+        lastUrlHydrateKeyRef.current = finalSearchUrl;
+        navigate(finalSearchUrl);
       } else {
         const finalId = uuidv4();
-        navigate(`/search/ai/${querySlug}-${finalId}?query=${encodeURIComponent(query)}`);
+        const finalAiUrl = `/search/ai/${querySlug}-${finalId}?query=${encodeURIComponent(query)}`;
+        lastUrlHydrateKeyRef.current = finalAiUrl;
+        navigate(finalAiUrl);
       }
     } catch (err) {
       setError("Something went wrong during the request");
@@ -1711,6 +1737,8 @@ function App() {
       setError("Invalid or missing query in URL");
       return;
     }
+
+    console.log("🔄 handleUrlSearch triggered:", { query: query.slice(0, 30), searchId, isAiMode, isGuest: !user?.id });
 
     setLoading(true);
     setError("");
@@ -1750,6 +1778,8 @@ function App() {
 
       data = await res.json();
 
+      console.log("📡 API Response:", { status: res.status, ok: res.ok, hasData: !!data, error: data?.error });
+
       if (!res.ok) {
         if (data.upgradeNeeded === true) {
           navigate(data.redirectTo || "/pricing");
@@ -1758,11 +1788,16 @@ function App() {
           setLoading(false);
           return;
         }
-        setError(data.error || "Failed to fetch response");
+        
+        // For shared links, still show error but attempt to render
+        const errorMsg = data.error || "Failed to fetch response";
+        console.warn("⚠️ API Error (guest mode, shared link):", errorMsg);
+        setError(errorMsg);
         setLoading(false);
         return;
       }
 
+      console.log("✓ Data loaded for URL search");
       setPrompt(query);
       setMode(isAiMode ? "ai" : "search");
       setResponse(data);
@@ -1771,9 +1806,13 @@ function App() {
       const finalId = searchId.split("-").pop() || data.finalId || uuidv4();
 
       if (isAiMode) {
-        navigate(`/search/ai/${querySlug}-${finalId}?query=${encodeURIComponent(query)}`);
+        const finalAiUrl = `/search/ai/${querySlug}-${finalId}?query=${encodeURIComponent(query)}`;
+        lastUrlHydrateKeyRef.current = finalAiUrl;
+        navigate(finalAiUrl);
       } else {
-        navigate(`/search/${querySlug}-${finalId}?query=${encodeURIComponent(query)}`);
+        const finalSearchUrl = `/search/${querySlug}-${finalId}?query=${encodeURIComponent(query)}`;
+        lastUrlHydrateKeyRef.current = finalSearchUrl;
+        navigate(finalSearchUrl);
       }
     } catch (err) {
       setError("Something went wrong during URL search");
