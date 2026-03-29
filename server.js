@@ -41,10 +41,17 @@ import { getQueueStats, closeQueues } from "./services/queue.js";
 // Prisma – with connection pool tuning for high concurrency
 import prismaPkg from '@prisma/client';
 const { PrismaClient } = prismaPkg;
+
+const hasDatabaseUrl = Boolean(String(process.env.DATABASE_URL || "").trim());
+
 const prisma = new PrismaClient({
-  datasources: { db: { url: process.env.DATABASE_URL } },
+  ...(hasDatabaseUrl ? { datasources: { db: { url: process.env.DATABASE_URL } } } : {}),
   log: process.env.NODE_ENV === "development" ? ["query", "warn", "error"] : ["warn", "error"],
 });
+
+if (!hasDatabaseUrl) {
+  logger.warn("DATABASE_URL is not set. DB-backed routes may fail until env vars are configured.");
+}
 
 // Razorpay Instance
 const razorpayInstance = new Razorpay({
