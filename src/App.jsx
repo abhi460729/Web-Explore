@@ -1351,21 +1351,22 @@ function App() {
     setIsProfileSidebarOpen(false);
   };
 
+  const handleSelectAutocompleteSuggestion = (suggestion, shouldSubmit = false) => {
+    const nextValue = String(suggestion || "").trim();
+    if (!nextValue) return;
+
+    setPrompt(nextValue);
+    setShowQuerySuggestions(false);
+    setQuerySuggestions([]);
+    setActiveSuggestionIndex(-1);
+
+    if (shouldSubmit) {
+      handleSubmit(null, nextValue, mode);
+    }
+  };
+
   const runHistoryEntry = (entry) => {
 
-      const handleSelectAutocompleteSuggestion = (suggestion, shouldSubmit = true) => {
-        const nextValue = String(suggestion || "").trim();
-        if (!nextValue) return;
-
-        setPrompt(nextValue);
-        setShowQuerySuggestions(false);
-        setQuerySuggestions([]);
-        setActiveSuggestionIndex(-1);
-
-        if (shouldSubmit) {
-          handleSubmit(null, nextValue, mode);
-        }
-      };
     const query = String(entry?.inputText || "").trim();
     if (!query) return;
 
@@ -4274,9 +4275,10 @@ function App() {
                             key={`${suggestion}-${idx}`}
                             type="button"
                             className={`query-suggestion-item ${activeSuggestionIndex === idx ? "active" : ""}`}
+                            onMouseEnter={() => setActiveSuggestionIndex(idx)}
                             onMouseDown={(event) => {
                               event.preventDefault();
-                              handleSelectAutocompleteSuggestion(suggestion, true);
+                              handleSelectAutocompleteSuggestion(suggestion, false);
                             }}
                           >
                             {suggestion}
