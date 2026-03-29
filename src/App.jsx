@@ -288,6 +288,7 @@ function App() {
   const [recentHistoryLoading, setRecentHistoryLoading] = useState(false);
   const [recentHistoryError, setRecentHistoryError] = useState("");
   const [expandedHistoryId, setExpandedHistoryId] = useState(null);
+  const [expandedProfileSection, setExpandedProfileSection] = useState("account");
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [activeTab, setActiveTab] = useState("answer");
   const [safeSearchByTab, setSafeSearchByTab] = useState(() => normalizeSafeSearchByTab(localStorage.getItem("safeSearchByTab")));
@@ -326,6 +327,13 @@ function App() {
   const user = JSON.parse(localStorage.getItem("user") || "{}");
   const [currentPlanName, setCurrentPlanName] = useState(user?.currentPlan?.name || "FREE");
   const isUltraUser = currentPlanName === "ULTRA";
+  const integrationEntries = [
+    { key: "gmail", label: "Gmail" },
+    { key: "calendar", label: "Calendar" },
+    { key: "docs", label: "Docs" },
+    { key: "sheets", label: "Sheets" },
+  ];
+  const connectedIntegrations = integrationEntries.filter((item) => integrations[item.key]).length;
 
   const formatHistoryTimestamp = (value) => {
     if (!value) return "Unknown time";
@@ -3996,45 +4004,129 @@ function App() {
 
       <div className={`profile-sidebar ${isProfileSidebarOpen ? "open" : ""}`}>
         <button
-          className="absolute top-4 right-4 p-2 bg-gray-300 rounded-full hover:bg-gray-400"
+          className="profile-close-btn"
           onClick={() => setIsProfileSidebarOpen(false)}
+          aria-label="Close profile pane"
         >
-          <X size={24} />
+          <X size={18} />
         </button>
         <h2 className="text-2xl font-semibold mb-6 border-b pb-2">Profile</h2>
         {user.name ? (
-          <div className="flex flex-col items-center space-y-6">
-            <img src={user.picture} alt="Profile" className="w-24 h-24 rounded-full object-cover border-2" />
-            <p className="text-xl font-medium">{user.name}</p>
-            <p className="text-sm text-gray-600">{user.email}</p>
-            <p className="text-sm font-medium text-gray-400">Current Plan: {currentPlanName}</p>
+          <div className="profile-pane-body">
+            <div className="profile-accordion-item">
+              <button
+                type="button"
+                className="profile-accordion-trigger"
+                onClick={() => setExpandedProfileSection((prev) => (prev === "account" ? null : "account"))}
+              >
+                <span className="profile-accordion-title">Account Overview</span>
+                <span className="profile-accordion-caret">
+                  {expandedProfileSection === "account" ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                </span>
+              </button>
 
-            <button
-              onClick={() => {
-                navigate("/pricing");
-                setIsProfileSidebarOpen(false);
-              }}
-              className="w-full bg-gray-600 hover:bg-gray-700 text-white py-3 rounded-lg"
-            >
-              Upgrade Plan
-            </button>
+              <div className={`profile-accordion-content ${expandedProfileSection === "account" ? "open" : ""}`}>
+                <div className="profile-header-card">
+                  <img src={user.picture} alt="Profile" className="profile-avatar" />
+                  <div className="profile-header-text">
+                    <p className="profile-name">{user.name}</p>
+                    <p className="profile-email">{user.email}</p>
+                  </div>
+                </div>
 
-            <button
-              onClick={handleAutomateWorkflows}
-              className="w-full bg-gray-600 hover:bg-gray-700 text-white py-3 rounded-lg font-medium shadow-md transition-all flex items-center justify-center"
-            >
-              Automate Workflows
-            </button>
+                <div className="profile-summary-grid">
+                  <div className="profile-summary-item">
+                    <span className="profile-summary-label">Plan</span>
+                    <span className="profile-summary-value">{currentPlanName}</span>
+                  </div>
+                  <div className="profile-summary-item">
+                    <span className="profile-summary-label">Integrations</span>
+                    <span className="profile-summary-value">{connectedIntegrations}/4</span>
+                  </div>
+                </div>
+              </div>
+            </div>
 
-            <button
-              className="w-full bg-gray-600 hover:bg-gray-700 text-white py-3 rounded-lg"
-              onClick={() => {
-                localStorage.removeItem("user");
-                window.location.replace("/");
-              }}
-            >
-              Sign Out
-            </button>
+            <div className="profile-accordion-item">
+              <button
+                type="button"
+                className="profile-accordion-trigger"
+                onClick={() => setExpandedProfileSection((prev) => (prev === "apps" ? null : "apps"))}
+              >
+                <span className="profile-accordion-title">Connected Apps</span>
+                <span className="profile-accordion-caret">
+                  {expandedProfileSection === "apps" ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                </span>
+              </button>
+
+              <div className={`profile-accordion-content ${expandedProfileSection === "apps" ? "open" : ""}`}>
+                <div className="profile-integration-list">
+                  {integrationEntries.map((item) => {
+                    const isConnected = Boolean(integrations[item.key]);
+                    return (
+                      <div key={item.key} className={`profile-integration-chip ${isConnected ? "connected" : "disconnected"}`}>
+                        <span>{item.label}</span>
+                        <span>{isConnected ? "Connected" : "Not connected"}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div className="profile-accordion-item">
+              <button
+                type="button"
+                className="profile-accordion-trigger"
+                onClick={() => setExpandedProfileSection((prev) => (prev === "actions" ? null : "actions"))}
+              >
+                <span className="profile-accordion-title">Quick Actions</span>
+                <span className="profile-accordion-caret">
+                  {expandedProfileSection === "actions" ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                </span>
+              </button>
+
+              <div className={`profile-accordion-content ${expandedProfileSection === "actions" ? "open" : ""}`}>
+                <div className="profile-actions">
+                  <button
+                    onClick={() => {
+                      navigate("/pricing");
+                      setIsProfileSidebarOpen(false);
+                    }}
+                    className="profile-action-btn"
+                  >
+                    Upgrade Plan
+                  </button>
+
+                  <button
+                    onClick={handleAutomateWorkflows}
+                    className="profile-action-btn"
+                  >
+                    Automate Workflows
+                  </button>
+
+                  <button
+                    className="profile-action-btn secondary"
+                    onClick={() => {
+                      setIsProfileSidebarOpen(false);
+                      setIsRecentSidebarOpen(true);
+                    }}
+                  >
+                    Open Recent Queries
+                  </button>
+
+                  <button
+                    className="profile-action-btn danger"
+                    onClick={() => {
+                      localStorage.removeItem("user");
+                      window.location.replace("/");
+                    }}
+                  >
+                    Sign Out
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         ) : (
           <p className="text-center text-gray-600">Not signed in</p>
