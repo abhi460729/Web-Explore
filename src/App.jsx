@@ -238,6 +238,7 @@ function App() {
   const location = useLocation();
   const navigate = useNavigate();
   const lastUrlHydrateKeyRef = useRef("");
+  const googleButtonContainerRef = useRef(null);
 
   
   const getDoodle = () => {
@@ -981,6 +982,22 @@ function App() {
     });
   };
 
+  const exchangeGoogleCredential = async (idToken) => {
+    const authRes = await fetch("/api/auth/google", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: idToken }),
+    });
+
+    const authData = await authRes.json();
+    if (!authRes.ok || !authData?.user) {
+      throw new Error(authData?.error || "Authentication failed");
+    }
+
+    localStorage.setItem("user", JSON.stringify(authData.user));
+    window.location.reload();
+  };
+
   const resolveGoogleClientId = async () => {
     const viteClientId = String(import.meta.env.VITE_GOOGLE_CLIENT_ID || "").trim();
     if (viteClientId) return viteClientId;
@@ -1017,20 +1034,7 @@ function App() {
           try {
             const idToken = googleUser?.credential;
             if (!idToken) throw new Error("No Google credential received");
-
-            const authRes = await fetch("/api/auth/google", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ token: idToken }),
-            });
-
-            const authData = await authRes.json();
-            if (!authRes.ok || !authData?.user) {
-              throw new Error(authData?.error || "Authentication failed");
-            }
-
-            localStorage.setItem("user", JSON.stringify(authData.user));
-            window.location.reload();
+            await exchangeGoogleCredential(idToken);
           } catch (err) {
             setGoogleLoginError(err?.message || "Google sign-in failed");
             setGoogleLoginLoading(false);
@@ -1045,6 +1049,71 @@ function App() {
       setGoogleLoginLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!shouldShowSharedLoginGate || isLoginOverlayDismissed) return;
+
+    let cancelled = false;
+
+    const initGoogleButton = async () => {
+      setGoogleLoginLoading(true);
+      setGoogleLoginError("");
+
+      try {
+        const clientId = await resolveGoogleClientId();
+        if (!clientId) {
+          setGoogleLoginError("Google login is not configured. Please contact support.");
+          setGoogleLoginLoading(false);
+          return;
+        }
+
+        await ensureGoogleIdentityScript();
+        if (cancelled) return;
+
+        window.google.accounts.id.initialize({
+          client_id: clientId,
+          callback: async (googleUser) => {
+            try {
+              const idToken = googleUser?.credential;
+              if (!idToken) throw new Error("No Google credential received");
+              await exchangeGoogleCredential(idToken);
+            } catch (err) {
+              setGoogleLoginError(err?.message || "Google sign-in failed");
+            } finally {
+              setGoogleLoginLoading(false);
+            }
+          },
+        });
+
+        if (googleButtonContainerRef.current) {
+          googleButtonContainerRef.current.innerHTML = "";
+          window.google.accounts.id.renderButton(googleButtonContainerRef.current, {
+            type: "standard",
+            shape: "pill",
+            theme: "outline",
+            text: "continue_with",
+            size: "large",
+            width: Math.min(360, Math.max(260, googleButtonContainerRef.current.offsetWidth || 320)),
+          });
+        }
+
+        // One Tap is optional: if blocked in incognito, button still works.
+        window.google.accounts.id.prompt();
+        setGoogleLoginLoading(false);
+      } catch (err) {
+        if (!cancelled) {
+          setGoogleLoginError(err?.message || "Unable to load Google sign-in");
+          setGoogleLoginLoading(false);
+        }
+      }
+    };
+
+    initGoogleButton();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [shouldShowSharedLoginGate, isLoginOverlayDismissed]);
 
   const toggleModelDropdown = () => setIsModelDropdownOpen(!isModelDropdownOpen);
 
@@ -4810,13 +4879,15 @@ function App() {
                 sources, tabs and actions.
               </p>
 
+              <div className="shared-google-slot" ref={googleButtonContainerRef} />
+
               <button
                 type="button"
                 className="shared-google-btn"
                 onClick={handleContinueWithGoogle}
                 disabled={googleLoginLoading}
               >
-                {googleLoginLoading ? "Starting Google Sign-In..." : "Continue with Google"}
+                {googleLoginLoading ? "Preparing Google Sign-In..." : "Try Google One Tap"}
               </button>
 
               {googleLoginError && <p className="shared-login-error">{googleLoginError}</p>}

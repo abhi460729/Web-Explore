@@ -268,6 +268,15 @@ form {
   line-height: 1.5;
 }
 
+.shared-google-slot {
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 0.25rem 0 0.65rem;
+}
+
 .shared-google-btn {
   width: 100%;
   border: none;
