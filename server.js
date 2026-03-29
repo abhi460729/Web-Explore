@@ -160,6 +160,8 @@ if (ALLOWED_GOOGLE_AUDIENCES.length === 0) {
   logger.warn("No Google OAuth audiences configured. Google login will fail until GOOGLE_CLIENT_ID is set.");
 }
 
+const PRIMARY_GOOGLE_CLIENT_ID = ALLOWED_GOOGLE_AUDIENCES[0] || "";
+
 function sanitizeModel(model) {
   return SUPPORTED_MODELS.includes(model) ? model : "gpt-4o-mini";
 }
@@ -655,6 +657,13 @@ app.post("/api/verify-razorpay-payment", paymentLimiter, async (req, res) => {
 });
 
 // ── Google Login ────────────────────────────────────────────────────────────
+app.get("/api/auth/google-config", (req, res) => {
+  res.json({
+    clientId: PRIMARY_GOOGLE_CLIENT_ID,
+    configured: Boolean(PRIMARY_GOOGLE_CLIENT_ID),
+  });
+});
+
 app.post("/api/auth/google", authLimiter, async (req, res) => {
   const { token } = req.body;
 

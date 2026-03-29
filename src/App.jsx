@@ -981,8 +981,24 @@ function App() {
     });
   };
 
+  const resolveGoogleClientId = async () => {
+    const viteClientId = String(import.meta.env.VITE_GOOGLE_CLIENT_ID || "").trim();
+    if (viteClientId) return viteClientId;
+
+    try {
+      const configRes = await fetch("/api/auth/google-config");
+      const configData = await configRes.json();
+      const runtimeClientId = String(configData?.clientId || "").trim();
+      if (runtimeClientId) return runtimeClientId;
+    } catch {
+      // Ignore and fall through to a user-facing error.
+    }
+
+    return "";
+  };
+
   const handleContinueWithGoogle = async () => {
-    const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+    const clientId = await resolveGoogleClientId();
 
     if (!clientId) {
       setGoogleLoginError("Google login is not configured. Please contact support.");
