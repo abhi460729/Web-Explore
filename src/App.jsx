@@ -4200,7 +4200,7 @@ function App() {
         )}
       </div>
 
-      <div className={`content-area ${isRecentSidebarOpen ? "with-left-pane" : ""}`}>
+      <div className={`content-area ${isRecentSidebarOpen ? "with-left-pane" : ""} ${isProfileSidebarOpen ? "with-right-pane" : ""}`}>
         <div className={`full-width-container${response ? " has-response" : ""}`}>
           {location.pathname === "/search" && (
             <>
