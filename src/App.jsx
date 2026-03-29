@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from "react";
-import { useParams, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import debounce from "lodash/debounce";
 import DOMPurify from "dompurify";
 import { Plus, User, X, Bot, Globe, Mic, Sun, Moon, Check, Zap, ArrowLeft, History, ChevronDown, ChevronRight, Search, Link, Share2, Download } from "lucide-react";
@@ -235,7 +235,6 @@ const downloadExperienceLetterPdf = async (payload) => {
 };
 
 function App() {
-  const { id } = useParams();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -895,9 +894,16 @@ function App() {
     const query = new URLSearchParams(location.search).get("query");
     const prefillFromState = location.state?.prefillPrompt;
     const autoRunMode = location.state?.autoRunMode;
+    const matchedPermalink = location.pathname.match(/^\/search\/(?:ai\/)?([^/]+)$/);
+    const isPermalinkRoute = !!matchedPermalink && !location.pathname.includes("/new/");
+    const routeSearchId = matchedPermalink?.[1] || "";
+    const isAiPermalink = location.pathname.startsWith("/search/ai/");
+    const hasHydratedResponse =
+      !!response &&
+      prompt.trim().toLowerCase() === String(query || "").trim().toLowerCase();
 
-    if (id && query) {
-      handleUrlSearch(query, id);
+    if (isPermalinkRoute && query && !hasHydratedResponse) {
+      handleUrlSearch(query, routeSearchId, isAiPermalink);
     } else if (prefillFromState && location.pathname === "/search") {
       setPrompt(prefillFromState);
       setResponse(null);
@@ -913,7 +919,14 @@ function App() {
       setMode("search");
       setError("");
     }
-  }, [id, location.search, location.pathname, location.state?.prefillPrompt, location.state?.autoRunMode]);
+  }, [
+    location.search,
+    location.pathname,
+    location.state?.prefillPrompt,
+    location.state?.autoRunMode,
+    response,
+    prompt,
+  ]);
 
   useEffect(() => {
     setActiveEmbedSlug("");
@@ -1516,7 +1529,7 @@ function App() {
     }
   };
 
-  const handleUrlSearch = async (query, searchId) => {
+  const handleUrlSearch = async (query, searchId, isAiMode = false) => {
     if (!query || query.length < 3) {
       setError("Invalid or missing query in URL");
       return;
@@ -1536,7 +1549,7 @@ function App() {
 
     try {
       let res, data;
-      if (searchId.startsWith("ai/") || searchId.startsWith("ai/new/")) {
+      if (isAiMode) {
         res = await fetch("/api/generate", {
           method: "POST",
           headers: {
@@ -1572,13 +1585,13 @@ function App() {
       }
 
       setPrompt(query);
-      setMode(searchId.startsWith("ai/") ? "ai" : "search");
+      setMode(isAiMode ? "ai" : "search");
       setResponse(data);
 
       const querySlug = generateQuerySlug(query);
-      const finalId = searchId.includes("new/") ? (data.finalId || uuidv4()) : searchId.split("-").pop();
+      const finalId = searchId.split("-").pop() || data.finalId || uuidv4();
 
-      if (searchId.startsWith("ai/")) {
+      if (isAiMode) {
         navigate(`/search/ai/${querySlug}-${finalId}?query=${encodeURIComponent(query)}`);
       } else {
         navigate(`/search/${querySlug}-${finalId}?query=${encodeURIComponent(query)}`);
