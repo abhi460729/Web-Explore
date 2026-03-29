@@ -138,9 +138,7 @@ const SUPPORTED_MODELS = [
 ];
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
-const LEGACY_GOOGLE_CLIENT_IDS = [
-  "408976603628-37t2cbqmivdlchr1p300io4eb3q2vrpf.apps.googleusercontent.com",
-];
+const LEGACY_GOOGLE_CLIENT_IDS = [];
 const ALLOWED_GOOGLE_AUDIENCES = Array.from(new Set([
   process.env.GOOGLE_CLIENT_ID,
   process.env.VITE_GOOGLE_CLIENT_ID,
